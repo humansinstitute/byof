@@ -93,68 +93,7 @@ export class Site {
         return { nappletCount: projects.length, decorationCount: decorations.length };
     }
     workshops(member: Member) { return (this.db.query('SELECT w.* FROM workshops w WHERE ?=1 OR w.owner=? OR (w.id=? AND EXISTS(SELECT 1 FROM members m WHERE m.pubkey=? AND m.state=\'admitted\')) OR EXISTS(SELECT 1 FROM workshop_members wm WHERE wm.workshop_id=w.id AND wm.pubkey=? AND wm.state=\'admitted\') ORDER BY w.created_at,w.id').all(Number(!!member.admin),member.pubkey,this.legacy(),member.pubkey,member.pubkey) as any[]).map(w => { if (w.id === this.legacy())
-        Object.assign(w, this.db.query('SELECT title,introduction,lightning,support_label,paused,admission FROM room WHERE id=1').get()); const canManage=!!member.admin || w.owner === member.pubkey;return { ...w, pictures: JSON.parse(w.pictures_json), canManage, canDelete:canManage&&w.id!==this.legacy(), legacy:w.id===this.legacy(), overview: this.canvasOverview(w.id) }; }); }
-    deleteCanvas(member:Member,id:string,body:any) {
-        const canvas=this.db.query('SELECT id,title,owner FROM workshops WHERE id=?').get(id) as any;
-        demand(canvas,404,'Canvas not found');
-        demand(!!member.admin||canvas.owner===member.pubkey,403,'Canvas owner or site administrator access required');
-        demand(id!==this.legacy(),409,'The default Canvas cannot be deleted because Freedom Tools requires it for legacy links and bootstrap state');
-        demand(body?.confirmPermanent===true&&body?.confirmTitle===canvas.title,400,`Type ${canvas.title} and confirm permanent deletion`);
-        const immutableDeletes=['epoch_history_no_delete','host_request_audit_no_delete','project_admin_audit_no_delete','project_fork_no_delete','request_attachment_no_delete','request_engine_correction_no_delete','request_engine_no_delete','request_epoch_no_delete','request_prompt_no_delete','revision_no_delete'];
-        const triggers=this.db.query(`SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name IN (${immutableDeletes.map(()=>'?').join(',')})`).all(...immutableDeletes) as {name:string;sql:string}[];
-        const projectScope='SELECT id FROM projects WHERE workshop_id=?';
-        const requestScope=`SELECT id FROM requests WHERE project_id IN (${projectScope})`;
-        const revisionScope=`SELECT id FROM revisions WHERE project_id IN (${projectScope})`;
-        const snapshotScope="SELECT id FROM publication_snapshots WHERE json_extract(body_json,'$.workshopId')=?";
-        return this.db.transaction(()=>{
-            // These triggers protect ordinary lifecycle history. This single immediate
-            // transaction is the only path that may remove a complete Canvas graph.
-            for(const trigger of triggers)this.db.exec(`DROP TRIGGER ${trigger.name}`);
-
-            this.db.run(`DELETE FROM publication_claims WHERE snapshot_id IN (${snapshotScope})`,[id]);
-            this.db.run(`DELETE FROM publication_operations WHERE snapshot_id IN (${snapshotScope})`,[id]);
-            this.db.run("DELETE FROM publication_snapshots WHERE json_extract(body_json,'$.workshopId')=?",[id]);
-
-            this.db.run(`DELETE FROM activity_receipts WHERE run_id IN (SELECT run_id FROM activity_authority WHERE workshop_id=? OR project_id IN (${projectScope})) OR run_id IN (SELECT invocation_run_id FROM activity_recovery_lineage WHERE request_id IN (${requestScope}))`,[id,id,id]);
-            this.db.run(`DELETE FROM activity_turns WHERE run_id IN (SELECT run_id FROM activity_authority WHERE workshop_id=? OR project_id IN (${projectScope}))`,[id,id]);
-            this.db.run(`DELETE FROM activity_recovery_lineage WHERE request_id IN (${requestScope})`,[id]);
-            this.db.run(`DELETE FROM request_activity WHERE request_id IN (${requestScope})`,[id]);
-            this.db.run(`DELETE FROM activity_authority WHERE workshop_id=? OR project_id IN (${projectScope})`,[id,id]);
-
-            this.db.run(`DELETE FROM request_attachments WHERE request_id IN (${requestScope}) OR attachment_id IN (SELECT id FROM chat_attachments WHERE workshop_id=?)`,[id,id]);
-            this.db.run(`DELETE FROM remote_versions WHERE revision_id IN (${revisionScope}) OR job_id IN (SELECT id FROM storage_jobs WHERE workshop_id=?)`,[id,id]);
-            this.db.run('DELETE FROM chat_attachments WHERE workshop_id=?',[id]);
-            this.db.run(`DELETE FROM storage_jobs WHERE workshop_id=? OR request_id IN (${requestScope})`,[id,id]);
-
-            for(const table of ['agent_publications','automatic_recovery','build_receipts','delivery_receipts','dispatch_receipts','final_message_receipts','host_request_audit','replacement_attempts','request_builder_prompts','request_dispatch','request_recoveries'])
-                this.db.run(`DELETE FROM ${table} WHERE request_id IN (${requestScope})`,[id]);
-            this.db.run(`DELETE FROM request_builder_engine_corrections WHERE request_id IN (SELECT request_id FROM request_builder_engines WHERE request_id IN (${requestScope}))`,[id]);
-            this.db.run(`DELETE FROM request_builder_engines WHERE request_id IN (${requestScope})`,[id]);
-            this.db.run(`DELETE FROM local_builds WHERE project_id IN (${projectScope}) OR request_id IN (${requestScope})`,[id,id]);
-            this.db.run(`DELETE FROM request_epochs WHERE request_id IN (${requestScope})`,[id]);
-            this.db.run(`DELETE FROM request_epoch_history WHERE request_id IN (${requestScope})`,[id]);
-            this.db.run(`DELETE FROM requests WHERE project_id IN (${projectScope})`,[id]);
-
-            this.db.run(`DELETE FROM builder_delete_deliveries WHERE run_id IN (SELECT run_id FROM builder_deletions WHERE project_id IN (${projectScope}))`,[id]);
-            this.db.run(`DELETE FROM builder_deletions WHERE project_id IN (${projectScope})`,[id]);
-            this.db.run(`DELETE FROM builder_epochs WHERE project_id IN (${projectScope})`,[id]);
-            this.db.run(`DELETE FROM conversation_receipts WHERE project_id IN (${projectScope})`,[id]);
-            this.db.run(`DELETE FROM consent WHERE project_id IN (${projectScope})`,[id]);
-            this.db.run('DELETE FROM project_admin_audit WHERE workshop_id=?',[id]);
-            this.db.run('DELETE FROM project_forks WHERE workshop_id=?',[id]);
-            this.db.run('DELETE FROM napplet_user_data WHERE workshop_id=?',[id]);
-            this.db.run(`UPDATE projects SET current_revision=NULL,shared_revision=NULL,origin_project=NULL,origin_revision=NULL WHERE workshop_id=?`,[id]);
-            this.db.run(`DELETE FROM revisions WHERE project_id IN (${projectScope})`,[id]);
-            this.db.run('DELETE FROM projects WHERE workshop_id=?',[id]);
-
-            for(const table of ['canvas_create_intents','invitations','moderation','workshop_board_images','workshop_boards','builder_engines','tower_storage_grants','workshop_storage_bindings','managed_workshop_storage','workshop_members','workshop_prompts'])
-                this.db.run(`DELETE FROM ${table} WHERE workshop_id=?`,[id]);
-            demand(this.db.run('DELETE FROM workshops WHERE id=?',[id]).changes===1,404,'Canvas not found');
-
-            for(const trigger of triggers)this.db.exec(trigger.sql);
-            return {deletedCanvasId:id,externalDataRetained:true,message:'Canvas deleted from Freedom Tools. Externally stored datasets and published artifacts were not deleted.'};
-        }).immediate();
-    }
+        Object.assign(w, this.db.query('SELECT title,introduction,lightning,support_label,paused,admission FROM room WHERE id=1').get()); return { ...w, pictures: JSON.parse(w.pictures_json), canManage: !!member.admin || w.owner === member.pubkey, overview: this.canvasOverview(w.id) }; }); }
     create(member: Member, body: any) {
         this.admin(member);
         const title = text(body.title, 'Workshop title', 120), intro = text(body.introduction || 'Welcome to our workshop.', 'Introduction', 3000);
