@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Napplet bridge demo</title><style>body{font:16px system-ui;max-width:42rem;margin:1rem}button,input{font:inherit;margin:.3rem;padding:.5rem}pre{white-space:pre-wrap;overflow-wrap:anywhere}label{display:block}</style></head><body>
+<h1>My Napplet notebook</h1><p>This demo uses the real injected API. Public identity and signing require host consent. Your note is private to this workshop, project and account.</p>
+<button id="capabilities">Capabilities</button><button id="identity">Public identity</button>
+<label>Note <input id="note" value="Hello from my Napplet" maxlength="4000"></label>
+<button id="save">Save note</button><button id="load">Load note</button><button id="remove">Remove note</button><button id="sign">Sign note</button>
+<pre id="result" role="status">Ready</pre>
+<script>
+const show=async action=>{try{document.querySelector('#result').textContent=JSON.stringify({ok:true,value:await action()},null,2);}catch(error){document.querySelector('#result').textContent=JSON.stringify({ok:false,code:error.code,message:error.message});}};
+document.querySelector('#capabilities').onclick=()=>show(()=>napplet.capabilities());
+document.querySelector('#identity').onclick=()=>show(()=>napplet.identity.getPublicKey());
+document.querySelector('#save').onclick=()=>show(()=>napplet.storage.set('note',{text:document.querySelector('#note').value}));
+document.querySelector('#load').onclick=()=>show(()=>napplet.storage.get('note'));
+document.querySelector('#remove').onclick=()=>show(()=>napplet.storage.remove('note'));
+document.querySelector('#sign').onclick=()=>show(()=>napplet.signing.signEvent({kind:30078,created_at:Math.floor(Date.now()/1000),tags:[['d','napplet-notebook']],content:JSON.stringify({text:document.querySelector('#note').value})}));
+</script></body></html>

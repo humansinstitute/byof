@@ -1,0 +1,43 @@
+# Dependencies and generated output
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+.bun/
+playwright-report/
+test-results/
+
+# Local runtime data and operational evidence
+tmp/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.log
+logs/
+public/identity.js
+
+# Environment files and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+credentials*.json
+secrets*.json
+ops/cordn/*.local.env
+ops/cordn/*.private.env
+
+# Local editor and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

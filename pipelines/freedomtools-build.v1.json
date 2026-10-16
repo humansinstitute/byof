@@ -1,0 +1,159 @@
+{
+  "name": "Freedom Tools project build",
+  "version": 1,
+  "description": "Typed Jev screening, explicit decision, gated persistent build, signed terminal result.",
+  "tags": [
+    "freedomtools"
+  ],
+  "input": {},
+  "steps": [
+    {
+      "name": "Jev screen",
+      "type": "code",
+      "function": "freedomtools.screen.v1",
+      "input": {
+        "pick": {
+          "prompt": "$.prompt"
+        }
+      },
+      "description": "One Jev call asks two typed Noul questions. Errors never ban and skip the builder.",
+      "display": {
+        "in": [
+          {
+            "label": "Participant instruction",
+            "path": "$.prompt",
+            "format": "text"
+          }
+        ],
+        "out": [
+          {
+            "label": "Action",
+            "path": "$.action",
+            "format": "text"
+          },
+          {
+            "label": "Injection probability",
+            "path": "$.injectionProbability",
+            "format": "text"
+          },
+          {
+            "label": "Private extraction probability",
+            "path": "$.privateExtractionProbability",
+            "format": "text"
+          },
+          {
+            "label": "Model",
+            "path": "$.model",
+            "format": "text"
+          }
+        ]
+      },
+      "assign": "$.screen"
+    },
+    {
+      "name": "Ban decision",
+      "type": "code",
+      "function": "freedomtools.decision.v1",
+      "input": {
+        "pick": {
+          "screen": "$.screen"
+        }
+      },
+      "description": "True means ban; false allows the builder only when the classifier succeeded.",
+      "display": {
+        "in": [
+          {
+            "label": "Policy evidence",
+            "path": "$.screen",
+            "format": "text"
+          }
+        ],
+        "out": [
+          {
+            "label": "Ban required",
+            "path": "$.banRequired",
+            "format": "text"
+          },
+          {
+            "label": "Builder allowed",
+            "path": "$.builderAllowed",
+            "format": "text"
+          }
+        ]
+      },
+      "assign": "$.decision"
+    },
+    {
+      "name": "Persistent project builder",
+      "type": "code",
+      "function": "freedomtools.gatedBuilder.v1",
+      "input": {
+        "pick": {
+          "requestId": "$.requestId",
+          "projectId": "$.projectId",
+          "prompt": "$.prompt"
+        }
+      },
+      "description": "Generation remains unavailable until correlated persistent turns and enforced isolation pass real acceptance. Ban and classifier-error branches skip this operation.",
+      "display": {
+        "in": [
+          {
+            "label": "Participant instruction",
+            "path": "$.prompt",
+            "format": "text"
+          }
+        ],
+        "out": [
+          {
+            "label": "Result",
+            "path": "$.action",
+            "format": "text"
+          },
+          {
+            "label": "Availability",
+            "path": "$.reply",
+            "format": "text"
+          }
+        ]
+      },
+      "assign": "$.builder",
+      "when": {
+        "path": "$.decision.builderAllowed",
+        "equals": true
+      }
+    },
+    {
+      "name": "Terminal result",
+      "type": "code",
+      "function": "freedomtools.terminal.v1",
+      "input": "$",
+      "description": "Return one terminal result. The Autopilot signed completion webhook is authoritative.",
+      "display": {
+        "in": [
+          {
+            "label": "Decision",
+            "path": "$.decision.action",
+            "format": "text"
+          }
+        ],
+        "out": [
+          {
+            "label": "Action",
+            "path": "$.action",
+            "format": "text"
+          },
+          {
+            "label": "Reply",
+            "path": "$.reply",
+            "format": "text"
+          },
+          {
+            "label": "Retryable",
+            "path": "$.retryable",
+            "format": "text"
+          }
+        ]
+      }
+    }
+  ]
+}

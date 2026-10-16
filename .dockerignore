@@ -1,0 +1,13 @@
+*
+!package.json
+!bun.lock
+!Dockerfile
+!captain-definition
+!src/
+!src/**
+!public/
+!public/**
+!scripts/
+!scripts/build.ts
+!templates/
+!templates/**

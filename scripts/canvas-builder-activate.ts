@@ -1,0 +1,24 @@
+// Scoped installation management. Keeps the currently supported Codex runtime.
+import { readFileSync, writeFileSync, renameSync, statSync } from 'node:fs';
+import { configuration } from '../src/config.ts';
+import { agentPublicationConfiguration } from '../src/pipeline/publication-configuration.ts';
+import { loadCapabilityClient } from './autopilot-runtime.ts';
+const { capabilityClientContextFromEnv, callCapabilityBrokerResponse } = await loadCapabilityClient();
+const [grantPath, evidencePath] = Bun.argv.slice(2);
+for (const path of [grantPath, evidencePath]) if (!path || Bun.spawnSync(['git', 'check-ignore', path]).exitCode !== 0 || Bun.spawnSync(['git', 'ls-files', '--error-unmatch', path]).exitCode === 0) throw Error('Use ignored, untracked grant and evidence paths');
+const config = configuration(), receipt = await Bun.file(grantPath!).json(), current = config.followup;
+if (!current || !config.storage || current.selectableBuilder || current.builderRuntime && current.builderRuntime.agent !== 'codex') throw Error('Canvas activation must preserve the current supported Codex runtime');
+const pins = receipt.grant?.functionHashes ?? {};
+if (!pins['freedomtools.followupPrepare.v72'] || !pins['freedomtools.agentPublish.v72'] || !/^[a-f0-9]{64}$/.test(receipt.grant?.definitionHash ?? '')) throw Error('Pinned Canvas Codex v72 grant required');
+const context = capabilityClientContextFromEnv();
+const response = await callCapabilityBrokerResponse('/api/mcp/wingman/project-tool', { sessionId: context.sessionId, operation: 'capabilities' }, context);
+const capabilities = await response.json();
+if (!response.ok || capabilities.protocol !== 'native-project-tools-v1' || capabilities.callableDuringTurn !== true) throw Error('Existing native project tool support is required');
+const next = agentPublicationConfiguration(current, receipt, process.cwd(), config.storage.installationId);
+const source = readFileSync('.env', 'utf8'), lines = source.split('\n');
+if (lines.filter(line => line.startsWith('FREEDOM_FOLLOWUP_CONFIG=')).length !== 1) throw Error('Expected one current builder routing entry');
+await Bun.write(evidencePath!, JSON.stringify({ previous: current, next, capabilities, activatedAt: new Date().toISOString(), managedAppRestartRequired: true, autopilotRestartPerformed: false }, null, 2));
+const temporary = '.env.canvas-' + crypto.randomUUID();
+writeFileSync(temporary, lines.map(line => line.startsWith('FREEDOM_FOLLOWUP_CONFIG=') ? 'FREEDOM_FOLLOWUP_CONFIG=' + JSON.stringify(next) : line).join('\n'), { flag: 'wx', mode: statSync('.env').mode & 0o777 });
+renameSync(temporary, '.env');
+console.log(JSON.stringify({ definitionId: next.definitionId, currentAgent: 'codex', managedAppRestartRequired: true }));
