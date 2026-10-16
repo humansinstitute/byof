@@ -40,7 +40,7 @@ async function prepareFollowup(workshop: Workshop, member: Member, projectId: st
     demand(request, 404, 'Saved request not found');
     if (request.run_id || !['unavailable','queued','dispatch_pending','dispatching'].includes(request.status)) return { request };
     demand(project.current_revision === request.expected_revision, 409, 'Project changed; saved request cannot be replayed');
-    const owner = workshop.membership(project.owner);
+    const owner = workshop.projectOwnerAccess(project.owner);
     demand(owner.state === 'admitted' && (request.mode === 'answer' || owner.allowance > 0), 403, 'Project owner cannot execute requests');
     demand(!workshop.roomRow().paused, 403, 'The host has paused building');
     demand(!workshop.db.query("SELECT id FROM requests WHERE project_id=? AND id<>? AND status IN ('queued','dispatching','dispatch_pending','building','storage_pending','execution_uncertain')").get(projectId, requestId), 409, 'A request is already running for this project');
@@ -113,7 +113,7 @@ export async function resumeFollowup(workshop: Workshop, member: Member, project
     if (entry.new_run || (current.status === 'dispatching' && now()-entry.claimed_at < 30)) return false;
     demand(current.run_id === entry.previous_run && ['failed','dispatching','dispatch_pending'].includes(current.status),409,'Recovery state changed');
     demand(project.current_revision === current.expected_revision,409,'Project changed; saved request cannot be replayed');
-    const owner = workshop.membership(project.owner);
+    const owner = workshop.projectOwnerAccess(project.owner);
     demand(owner.state === 'admitted' && (current.mode === 'answer' || owner.allowance > 0),403,'Project owner cannot execute requests');
     demand(!workshop.roomRow().paused,403,'The host has paused building');
     demand(!workshop.db.query("SELECT id FROM requests WHERE project_id=? AND id<>? AND status IN ('queued','dispatching','dispatch_pending','building','storage_pending','execution_uncertain')").get(projectId,requestId),409,'A request is already running for this project');

@@ -24,15 +24,15 @@ beforeEach(async()=>{
 });
 afterEach(()=>{app.db.close();rmSync(directory,{recursive:true,force:true});});
 
-test('rename and edit are owner-only with bounded, unique names and metadata-only updates',async()=>{
+test('rename and edit allow the owner and Canvas administrator with bounded, unique names and metadata-only updates',async()=>{
   const admin=await login(adminSecret),owner=await login(),other=await login();
   const source=(await call('projects',{starterId:'game'},owner)).data;
   const foreign=(await call('projects',{starterId:'todo'},other)).data;
   const path=`projects/${source.project.id}/rename`,before=await call(`projects/${source.project.id}`,undefined,owner);
   expect((await call(path,{title:'Not yours'},other)).status).toBe(404);
-  expect((await call(path,{title:'Admin is not owner'},admin)).status).toBe(404);
+  expect((await call(path,{title:'Admin managed name'},admin)).status).toBe(200);
   expect((await call(`projects/${source.project.id}/edit`,undefined,other)).status).toBe(404);
-  expect((await call(`projects/${source.project.id}/edit`,undefined,admin)).status).toBe(404);
+  expect((await call(`projects/${source.project.id}/edit`,undefined,admin)).status).toBe(200);
   expect((await call(`projects/${source.project.id}/edit`,undefined,owner)).status).toBe(200);
   for(const title of ['', '   ', 'x'.repeat(121), 'two\nlines'])expect((await call(path,{title},owner)).status).toBe(400);
   expect((await call(path,{title:foreign.project.title.toUpperCase()},owner)).status).toBe(409);

@@ -44,6 +44,7 @@ const previewEscapeBridge = `<script>document.addEventListener('keydown',functio
 export function application(rootConfig: Config, fixtures?: {datasetTransport:(scope:any)=>import('./tower-storage-client.ts').StorageTransport}) {
   const config=rootConfig;
   const db = openDatabase(config.dataDir), auth = new Auth(db, config), workshop = new Workshop(db, new Assets(join(config.dataDir, "objects")));
+  Workshop.siteAdminProviders.set(db,pubkey=>auth.isHost(pubkey));
   installSite(db,config); installBoard(workshop); installProfileStore(db); const site=new Site(db,config); const towerConnector=new TowerConnect(site,workshop.assets); installDeliveryTables(db); installActivityTables(db); installStorageTables(workshop); workshop.storageRequired=!!config.storage;
   loadBuilderEngine(db,workshop.id,config.followup?.builderRuntime?.agent??"codex");
   const nappletData = new NappletData(db);
@@ -166,6 +167,8 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport:(sc
       if(path==='/api/v1/profile'&&['GET','POST'].includes(method))return json(site.profile(identity,method==='POST'?body:undefined));
       if(path==='/api/v1/workshops'&&method==='GET')return json({workshops:site.workshops(identity).map(w=>({...w,...(identity.admin&&w.tower_id?{setupState:storageStatus(new Workshop(db,workshop.assets,w.id),site.storage(w.id)).state}:{})})),legacyWorkshopId:site.legacy()});
       if(path==='/api/v1/site/workshops'&&method==='POST')return json(site.create(identity,body),201);
+      const canvasDelete=path.match(/^\/api\/v1\/workshops\/([a-f0-9-]{36})$/);
+      if(canvasDelete&&method==='DELETE')return json(site.deleteCanvas(identity,canvasDelete[1]!,body));
       if(path==='/api/v1/site/towers'&&method==='GET')return json({towers:site.towers(identity)});
       if(path==='/api/v1/site/towers'&&method==='POST')return json({towers:site.register(identity,body)},201);
       const towerConnect=path.match(/^\/api\/v1\/site\/towers\/([^/]+)\/connect$/);
@@ -258,8 +261,8 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport:(sc
         const [, id, action] = project;
         if (!action && method === "GET") return json({ ...workshop.detail(member, id!), execution: executionLinks(workshop,member,id!,config.followup), nativeDeletionAvailable: !!config.followup?.nativeDeletion && !config.followup.suspended && followupAvailable(workshop.project(member,id!),config.followup), generationAvailable: followupAvailable(workshop.project(member,id!),config.followup)&&runtimeAvailable(config.followup,loadBuilderEngine(db,workshop.id).runtime), storageReady:workshop.storageReady, generationReason: !runtimeAvailable(config.followup,loadBuilderEngine(db,workshop.id).runtime)?'The selected builder engine awaits platform activation; your request and app remain saved.':!workshop.storageReady ? 'Private storage needs authorization. Questions are available; app changes wait for the site administrator to connect storage.' : config.followup?.suspended && id === config.followup.projectId ? "This project conversation is awaiting native resume activation. Requests are saved without execution." : null });
         if (action === "edit" && method === "GET") {
-          workshop.project(member,id!,true);
-          return json({ ...workshop.detail(member,id!), execution:executionLinks(workshop,member,id!,config.followup), nativeDeletionAvailable:!!config.followup?.nativeDeletion&&!config.followup.suspended&&followupAvailable(workshop.project(member,id!,true),config.followup), generationAvailable:followupAvailable(workshop.project(member,id!,true),config.followup)&&runtimeAvailable(config.followup,loadBuilderEngine(db,workshop.id).runtime), storageReady:workshop.storageReady, generationReason:!runtimeAvailable(config.followup,loadBuilderEngine(db,workshop.id).runtime)?'The selected builder engine awaits platform activation; your request and app remain saved.':!workshop.storageReady?'Private storage needs authorization. Questions are available; app changes wait for the site administrator to connect storage.':null });
+          workshop.editableProject(member,id!);
+          return json({ ...workshop.detail(member,id!), execution:executionLinks(workshop,member,id!,config.followup), nativeDeletionAvailable:!!config.followup?.nativeDeletion&&!config.followup.suspended&&followupAvailable(workshop.editableProject(member,id!),config.followup), generationAvailable:followupAvailable(workshop.editableProject(member,id!),config.followup)&&runtimeAvailable(config.followup,loadBuilderEngine(db,workshop.id).runtime), storageReady:workshop.storageReady, generationReason:!runtimeAvailable(config.followup,loadBuilderEngine(db,workshop.id).runtime)?'The selected builder engine awaits platform activation; your request and app remain saved.':!workshop.storageReady?'Private storage needs authorization. Questions are available; app changes wait for the site administrator to connect storage.':null });
         }
         if (action === "preview" && method === "GET") {
           const revisionId=url.searchParams.get('revision')||'',revision=workshop.previewRevision(member,id!,revisionId);

@@ -63,7 +63,7 @@ test('new apps seed stable nonoverlapping placements; hidden placements retained
  expect(hidden.objects.some((o:any)=>o.id===p.id)).toBe(false);await call('board',host,{expectedVersion:hidden.version,objects:hidden.objects});
  await call('host/projects/'+p.id,host,{hidden:false});expect((await room(host)).board.objects.find((o:any)=>o.id===p.id)).toEqual(one);
 });
-test('workshop boundaries and host versus app-edit permissions remain independent',async()=>{
+test('workshop boundaries remain independent while the scoped host can edit participant apps',async()=>{
  const {host,a,b}=await setup(),p=await create(a);
  const created=(await call('site/workshops',host,{title:'Other',owner:a.member.pubkey,introduction:'Test'})).data.workshop;
  // Site API returns workshop directly in a wrapper.
@@ -76,7 +76,7 @@ test('workshop boundaries and host versus app-edit permissions remain independen
  const board=(await call('room',a,undefined,headers)).data.board;
  expect((await call('board',b,{expectedVersion:board.version,objects:board.objects},headers)).status).toBe(403);
  expect((await call('board',a,{expectedVersion:board.version,objects:board.objects},headers)).status).toBe(200);
- expect((await call('projects/'+other.id+'/rename',a,{title:'Host does not own app'},headers)).status).toBe(404);
+ expect((await call('projects/'+other.id+'/rename',a,{title:'Host managed app'},headers)).status).toBe(200);
  expect((await call('board',a,{expectedVersion:0,objects:[]},{'x-workshop-id':app.site.legacy()})).status).toBe(403);
 });
 

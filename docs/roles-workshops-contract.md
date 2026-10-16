@@ -23,6 +23,19 @@ Tower connections. `FREEDOM_HOST_NPUB` bootstraps site/legacy-workshop ownership
 `FREEDOM_ADMIN_NPUBS` optionally adds site administrators. New workshops use approval
 admission. Existing public-key API contracts remain unchanged.
 
+Every admitted participant may fork any visible, active Napplet in the selected
+workshop. The fork keeps exact source lineage but receives its own participant
+owner, project identity, revisions, conversation, requests, builder runtime and
+publication choices. Hidden, unavailable, banned-owner and cross-workshop sources
+remain unavailable. Workshop owners and site administrators can list, open,
+rename, converse with, activate versions and manage sharing for every Napplet in
+their selected workshop without ownership transfer. Administrative conversation
+changes use the explicit audited host-follow-up route; metadata/version/sharing
+actions have immutable actor/owner audit rows. Only the participant owner can
+grant exact-version public publication consent. A workshop or site administrator
+who owns a project is treated as active even without a redundant membership row,
+including persisted forks created before this rule was centralized.
+
 ## Nostr profile cache
 
 `nostr-profile.ts` verifies fresh copies of signed kind-0 events with nostr-tools,

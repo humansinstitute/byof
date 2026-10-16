@@ -108,7 +108,7 @@ async function prepareReplacement(workshop:Workshop,member:Member,projectId:stri
     if(options.automatic)demand(!db.query('SELECT id FROM requests WHERE project_id=? AND rowid>(SELECT rowid FROM requests WHERE id=?) LIMIT 1').get(projectId,requestId),409,'A newer saved instruction supersedes automatic recovery');
     const freshProject=workshop.project(member,projectId,!member.host);
     demand(freshProject.current_revision===current.expected_revision,409,'Project changed; saved request cannot be replayed');
-    const owner=workshop.membership(project.owner);
+    const owner=workshop.projectOwnerAccess(project.owner);
     demand(owner.state==='admitted' && (current.mode==='answer'||owner.allowance>0),403,'Project owner cannot execute requests');
     demand(!workshop.roomRow().paused,403,'The host has paused building');
     demand(!db.query("SELECT id FROM requests WHERE project_id=? AND id<>? AND status IN ('queued','dispatching','dispatch_pending','building','storage_pending','execution_uncertain')").get(projectId,requestId),409,'A request is already running');

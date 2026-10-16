@@ -1,7 +1,9 @@
 # Live workshop desktop
 
 The workshop is a DOM desktop of every active Napplet. Active means a project in
-the selected workshop, not hidden, whose owner has admitted workshop membership.
+the selected workshop, not hidden, whose owner is admitted or holds scoped
+workshop/site-administrator authority (which does not require a redundant
+`workshop_members` row).
 There is one window per project, using its current immutable saved checkpoint.
 Creating a starter creates a completed checkpoint; a blank starter explains that
 it is ready to build. A project without a checkpoint shows a waiting placeholder.
@@ -25,9 +27,10 @@ but does not drive desktop placement or revision selection.
 
 Only the server-derived workshop host role may write `POST /api/v1/board`.
 Workshop owners and genuinely configured site administrators have that role;
-ordinary Napplet ownership does not confer it. App rename/edit rights remain
-separate, including the rule that a nonadmin workshop host cannot rename someone
-else's app. Session, origin, CSRF and selected-workshop checks apply to writes.
+ordinary Napplet ownership does not confer it. The same scoped administrators
+can open and edit participant Napplets without changing their owners. Ordinary
+participants can edit only their own Napplets. Session, origin, CSRF and
+selected-workshop checks apply to writes.
 
 Each workshop has an additive `workshop_boards` row with a monotonically increasing
 version and JSON placements. Objects have ID, kind, x/y, width/height and optional

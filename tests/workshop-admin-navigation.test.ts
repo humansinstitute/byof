@@ -21,3 +21,16 @@ test('workshop edit action checks authority and selects the clicked workshop bef
   expect(handler.indexOf('selectedWorkshop=id')).toBeLessThan(handler.indexOf('await page()'));
   expect(handler).toContain("screen='edit'");
 });
+
+test('Napplet edit affordances distinguish administrators from ordinary nonowners',()=>{
+  const card=source.match(/function nappletCard\(p, own\) \{[\s\S]*?\n\}/)?.[0]||'';
+  expect(card).toContain('canEdit=owner||me.host');
+  expect(card).toContain("control(canEdit ? 'napplet-settings' : 'napplet-options'");
+  const actions=source.match(/if \(action === 'napplet-settings' \|\| action === 'napplet-options'\) \{[\s\S]*?\n    \}/)?.[0]||'';
+  expect(actions).toContain('canEdit=owner||me.host');
+  expect(actions).toContain("owner?'Edit your Napplet!':'Edit Napplet as administrator'");
+  expect(actions).toContain("if (action === 'napplet-settings' && !canEdit)");
+  expect(source).toContain("canEdit=detail.permissions?.edit??own");
+  expect(source).toContain("own ? 'Your project' : 'Administrator editing'");
+  expect(source).toContain('Administrative changes are recorded under your account. Public publication consent remains with the Napplet owner.');
+});

@@ -23,7 +23,7 @@ export function publicationAuthority(workshop:Workshop,body:any) {
     epoch?.state==='active'&&epoch.generation===input.generation&&n.receiptId&&n.sessionId&&n.nativeSessionId&&Number.isInteger(n.sequence)&&
     (epoch.native_id?n.nativeSessionId===epoch.native_id&&(n.sequence===epoch.sequence+1||(finished&&n.sequence===finished.sequence&&n.receiptId===finished.receiptId&&n.sessionId===finished.sessionId&&n.nativeSessionId===finished.nativeSessionId)):n.sequence===1),403,'Publication native authority denied');
   verifyActivityFinal(db,r.run_id,r.id,n);
-  const owner=workshop.membership(p.owner);
+  const owner=workshop.projectOwnerAccess(p.owner);
   demand(owner.state==='admitted'&&!workshop.roomRow().paused&&r.mode!=='answer',403,'Publication admission denied');
   return {request:r,project:p,nativeReceipt:n};
 }
@@ -37,7 +37,7 @@ export function beginAgentPublication(workshop:Workshop,body:any,storage?:Storag
     db.run('UPDATE agent_publications SET attempts=attempts+1 WHERE request_id=?',[r.id]);
     return {status:'pending',...(storage?candidateStorageJob(workshop,storage,body):{})};
   }
-  demand(r.status==='building'&&p.current_revision===r.expected_revision&&workshop.membership(p.owner).allowance>0,409,'Publication revision or allowance changed');
+  demand(r.status==='building'&&p.current_revision===r.expected_revision&&workshop.projectOwnerAccess(p.owner).allowance>0,409,'Publication revision or allowance changed');
   readLocalCandidate(workshop,r,body.candidate);
   db.run('INSERT INTO agent_publications(request_id,run_id,candidate_json,status) VALUES(?,?,?,?)',[r.id,r.run_id,JSON.stringify(body.candidate),'pending']);
   return {status:'pending',...(storage?candidateStorageJob(workshop,storage,body):{})};
@@ -64,11 +64,12 @@ export function registerAgentPublication(workshop:Workshop,body:any) {
       demand(receipt.sha256===candidate.remoteStorage?.sha256&&receipt.jobId===candidate.jobId&&JSON.stringify(receipt.remoteStorage)===JSON.stringify(candidate.remoteStorage),409,'Publication receipt conflict');
       return receipt;
     }
-    demand(['building','storage_pending'].includes(r.status)&&p.current_revision===r.expected_revision&&workshop.membership(p.owner).allowance>0,409,'Publication revision or allowance changed');
+    demand(['building','storage_pending'].includes(r.status)&&p.current_revision===r.expected_revision&&workshop.projectOwnerAccess(p.owner).allowance>0,409,'Publication revision or allowance changed');
     const local=readLocalCandidate(workshop,r,candidate);
     const remote=requireRemoteVersion(workshop,r,candidate,local.hash);
     promoteLocalCandidate(local);
-    const revision=workshop.addRevision(p,workshop.assets.put(local.source),p.owner);
+    const hostSubmission=db.query('SELECT actor FROM host_request_audit WHERE request_id=?').get(r.id) as any;
+    const revision=workshop.addRevision(p,workshop.assets.put(local.source),hostSubmission?.actor??p.owner);
     const receipt={status:'published',requestId:r.id,projectId:p.id,runId:r.run_id,version:local.row.version,revisionId:revision,
       sha256:local.hash,jobId:remote.jobId,remoteStorage:remote.artifact,url:`/api/v1/projects/${p.id}/preview?workshop=${workshop.id}&revision=${revision}`};
     db.run('INSERT INTO remote_versions VALUES(?,?,?)',[revision,remote.jobId,JSON.stringify(remote.artifact)]);

@@ -52,7 +52,10 @@ export function openDatabase(directory: string): Database {
     CREATE UNIQUE INDEX one_active_project_request ON requests(project_id) WHERE status IN ('queued','dispatching','dispatch_pending','building','storage_pending','execution_uncertain');`);
   db.exec(`CREATE TABLE IF NOT EXISTS host_request_audit(request_id TEXT PRIMARY KEY REFERENCES requests(id),actor TEXT NOT NULL REFERENCES members(pubkey),project_owner TEXT NOT NULL REFERENCES members(pubkey),reason TEXT NOT NULL,created_at INTEGER NOT NULL);
     CREATE TRIGGER IF NOT EXISTS host_request_audit_no_update BEFORE UPDATE ON host_request_audit BEGIN SELECT RAISE(ABORT,'immutable host request audit'); END;
-    CREATE TRIGGER IF NOT EXISTS host_request_audit_no_delete BEFORE DELETE ON host_request_audit BEGIN SELECT RAISE(ABORT,'immutable host request audit'); END;`);
+    CREATE TRIGGER IF NOT EXISTS host_request_audit_no_delete BEFORE DELETE ON host_request_audit BEGIN SELECT RAISE(ABORT,'immutable host request audit'); END;
+    CREATE TABLE IF NOT EXISTS project_admin_audit(id TEXT PRIMARY KEY,workshop_id TEXT NOT NULL,project_id TEXT NOT NULL REFERENCES projects(id),project_owner TEXT NOT NULL REFERENCES members(pubkey),actor TEXT NOT NULL REFERENCES members(pubkey),action TEXT NOT NULL,detail_json TEXT NOT NULL,created_at INTEGER NOT NULL);
+    CREATE TRIGGER IF NOT EXISTS project_admin_audit_no_update BEFORE UPDATE ON project_admin_audit BEGIN SELECT RAISE(ABORT,'immutable project admin audit'); END;
+    CREATE TRIGGER IF NOT EXISTS project_admin_audit_no_delete BEFORE DELETE ON project_admin_audit BEGIN SELECT RAISE(ABORT,'immutable project admin audit'); END;`);
   db.exec(`CREATE TABLE IF NOT EXISTS workshop_identity(id INTEGER PRIMARY KEY CHECK(id=1),workshop_id TEXT NOT NULL UNIQUE);
     CREATE TABLE IF NOT EXISTS local_builds(request_id TEXT PRIMARY KEY REFERENCES requests(id),project_id TEXT NOT NULL REFERENCES projects(id),directory TEXT NOT NULL,version INTEGER NOT NULL,artifact_path TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'draft',source_hash TEXT,revision_id TEXT REFERENCES revisions(id));`);
   const buildColumns=db.query('PRAGMA table_info(local_builds)').all() as {name:string}[];

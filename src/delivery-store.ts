@@ -87,7 +87,7 @@ export function storeDelivery(db: Database, delivery: VerifiedDelivery, workshop
             (answer && result!.source !== undefined)) throw new DeliveryDenied('conversation_mode_denied');
         const response = result!.response;
         if ((answer || receipt.conversationKey !== undefined) && (typeof response !== 'string' || !response.trim() || response.length > limits.responseChars)) throw new DeliveryDenied('response_required');
-        const owner = workshop.membership(project.owner);
+        const owner = workshop.projectOwnerAccess(project.owner);
         let status = 'succeeded', error: string | null = null;
         if(messageOnly&&publication?.status!=='published'&&publication){status='storage_pending';error='Publication needs retry. Your previous version is preserved.';}
         else if(messageOnly&&request.mode==='build'&&publication?.status!=='published'){status='failed';error='The agent finished without publishing an app. Your previous version is preserved; no allowance was charged.';}
@@ -100,7 +100,8 @@ export function storeDelivery(db: Database, delivery: VerifiedDelivery, workshop
           if (source !== null) {
             const remote=local&&(local.row.storage_required||result!.remoteStorage)?requireRemoteVersion(workshop,request,result,local.hash):null;
             if(local)promoteLocalCandidate(local);
-            const revision = workshop.addRevision(project, workshop.assets.put(source), project.owner);
+            const hostSubmission=db.query('SELECT actor FROM host_request_audit WHERE request_id=?').get(request.id) as any;
+            const revision = workshop.addRevision(project, workshop.assets.put(source), hostSubmission?.actor??project.owner);
             if(remote)db.run('INSERT INTO remote_versions VALUES(?,?,?)',[revision,remote.jobId,JSON.stringify(remote.artifact)]);
             db.run("INSERT INTO build_receipts VALUES(?,?,?)", [request.id, revision, JSON.stringify({...receipt,...(local?{artifact:{path:`v${local.row.version}/index.html`,version:local.row.version,sha256:local.hash,url:`/api/v1/projects/${project.id}/preview?revision=${revision}`,validation:result!.validation,hosting:remote?'tower-private-s3':'authenticated-workshop',...(remote?{remoteStorage:remote.artifact,jobId:remote.jobId}:{})}}:{})})]);
             if(local)db.run("UPDATE local_builds SET status='completed',source_hash=?,revision_id=? WHERE request_id=?",[local.hash,revision,request.id]);

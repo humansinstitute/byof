@@ -1,11 +1,11 @@
 # Napplet titles and workshop previews
 
-Owners and site admins can rename Napplets through the window settings cog or builder. Workshop hosts without site admin rights retain inspection/moderation access only. `POST
+Owners, workshop owners and site administrators can rename Napplets through the window settings cog or builder. `POST
 /api/v1/projects/:id/rename` takes `{title}` and returns `{project}`. The title is
 trimmed, required, at most 120 input characters, and cannot contain line breaks
 or control characters. Browser rendering escapes titles and uses text attributes
 for accessible names. Authentication, CSRF, admission, workshop selection and
-project ownership or site admin rights are required; workshop host inspection alone does not grant rename authority.
+project ownership or scoped workshop-administrator authority are required. Cross-workshop authority is never inferred.
 
 Renaming updates only project metadata. It does not change source bytes, immutable
 revisions, shared revision selection, consent, conversation history, builder state,
@@ -43,8 +43,9 @@ Its screenshots and results are written under ignored `tmp/docs/handoffs/`.
 
 
 Workshop windows show only the title and small minimize/restore, green pop-out,
-and settings controls. Nonowners see a secondary options menu for Fork instead
-of settings. The app viewport is 380px high, with full card width; the bar is
+and settings controls. Administrators see settings for every Napplet in their
+selected workshop; ordinary nonowners see a secondary options menu for Fork.
+The app viewport is 380px high, with full card width; the bar is
 44px high and touch targets expand to 44px on coarse pointers. Author, version,
 description, gallery headings and repeated builder buttons are omitted.
 
@@ -53,7 +54,10 @@ current page session. It survives room events, rename and identity-menu rerender
 The iframe remains mounted with its original dimensions but hidden, clipped and
 inert until restored; data and saved revisions are never deleted. Pop-out also
 restores a minimized window. Settings use a keyboard-accessible native dialog
-with Escape and focus return. Site admin rename changes title metadata only:
-sharing, consent, restore, generation and moderation keep their existing gates.
+with Escape and focus return. Workshop-owner and site-admin edits retain the
+participant owner, use explicit scoped server authority and append immutable
+audit rows for rename, activation, restore and sharing. Host conversation changes
+continue through the separately audited host-follow-up route. Public publication
+consent remains owner-only and cannot be supplied by an administrator.
 
 Authenticated preview responses inject the [Napplet bridge v1](napplet-bridge-api.md) before app scripts. Identity consent, participant signing and durable per-user project storage travel over a channel bound to the existing frame; sandbox and network-denying CSP stay unchanged. Removing/replacing a frame revokes its grants, while resize/minimize/pop-out preserve its channel with the document.

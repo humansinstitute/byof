@@ -183,20 +183,73 @@ test('metadata rename stays inside an existing workshop even for an owner in bot
 });
 
 
-test('Napplet settings rename permits only the project owner and keeps grants scoped', async () => {
+test('Napplet settings allow scoped administrators without transferring ownership or public consent', async () => {
  const {admin,owner,user,w,other}=await setup();
  await call('host/settings',settings,owner,w.id);await call('workshops/join',{},user,w.id);
  const d=(await call('projects',{starterId:'game'},user,w.id)).data,id=d.project.id,path=`projects/${id}/rename`;
- expect((await call(path,{title:'Workshop owner denied'},owner,w.id)).status).toBe(404);
+ expect((await call(path,{title:'Workshop owner managed'},owner,w.id)).status).toBe(200);
  expect((await call(path,{title:'Participant rename'},user,w.id)).status).toBe(200);
- expect((await call(path,{title:'Admin rename'},admin,w.id)).status).toBe(404);
+ expect((await call(path,{title:'Admin rename'},admin,w.id)).status).toBe(200);
  expect((await call(path,{title:'Cross workshop'},admin,other.id)).status).toBe(404);
  expect((await call(path,{title:'CSRF'},admin,w.id,{'x-csrf-token':'wrong'})).status).toBe(403);
- expect((await call(`projects/${id}/restore`,{revisionId:d.project.current_revision,expectedRevisionId:d.project.current_revision},admin,w.id)).status).toBe(404);
+ expect((await call(`projects/${id}/restore`,{revisionId:d.project.current_revision,expectedRevisionId:d.project.current_revision},admin,w.id)).status).toBe(200);
  expect((await call(`projects/${id}/consent`,{revisionId:d.project.current_revision,granted:true},admin,w.id)).status).toBe(404);
  const after=(await call(`projects/${id}`,undefined,admin,w.id)).data;
- expect(after.project).toEqual({...d.project,title:'Participant rename'});
- for(const key of ['revisions','requests','consent','artifacts','builder'])expect(after[key]).toEqual(d[key]);
+ expect(after.project).toMatchObject({id,owner:user.member.pubkey,title:'Admin rename'});
+ expect(after.project.owner).toBe(user.member.pubkey);expect(after.revisions).toHaveLength(d.revisions.length+1);
+ for(const key of ['requests','consent','artifacts','builder'])expect(after[key]).toEqual(d[key]);
+ expect(app.db.query('SELECT count(*) n FROM project_admin_audit WHERE project_id=?').get(id)).toEqual({n:3});
+});
+
+test('member forks stay independent while workshop and site administrators can view and edit them in scope',async()=>{
+ const {admin,owner,user,w,other}=await setup(),forker=await login(),pending=await login();
+ await call('host/settings',settings,owner,w.id);
+ for(const account of [user,forker])await call('workshops/join',{},account,w.id);
+ const source=(await call('projects',{starterId:'game'},user,w.id)).data;
+ const fork=(await call('projects',{forkProjectId:source.project.id,idempotencyKey:'participant-fork'},forker,w.id)).data;
+ expect(fork.project).toMatchObject({owner:forker.member.pubkey,origin_project:source.project.id,origin_revision:source.project.current_revision});
+ expect(fork.project.conversation_id).not.toBe(source.project.conversation_id);expect(fork.requests).toEqual([]);
+ expect((await call(`projects/${fork.project.id}/requests`,{requestId:'participant-first-edit',prompt:'Change only my fork',expectedRevisionId:fork.project.current_revision},forker,w.id)).status).toBe(200);
+ expect((await call(`projects/${source.project.id}`,undefined,user,w.id)).data.requests).toEqual([]);
+ expect((await call(`projects/${fork.project.id}`,undefined,user,w.id)).status).toBe(404);
+
+ expect(app.db.query('SELECT * FROM workshop_members WHERE workshop_id=? AND pubkey=?').get(w.id,owner.member.pubkey)).toBeNull();
+ const hostFork=(await call('projects',{forkProjectId:source.project.id,idempotencyKey:'owner-fork'},owner,w.id)).data;
+ expect(app.db.query('SELECT * FROM workshop_members WHERE workshop_id=? AND pubkey=?').get(w.id,owner.member.pubkey)).toBeNull();
+ expect((await call(`projects/${hostFork.project.id}/requests`,{requestId:'owner-first-edit',prompt:'Change my fork',expectedRevisionId:hostFork.project.current_revision},owner,w.id)).status).toBe(200);
+ expect(app.db.query('SELECT * FROM workshop_members WHERE workshop_id=? AND pubkey=?').get(w.id,owner.member.pubkey)).toBeNull();
+
+ for(const administrator of [owner,admin]){
+   const room=(await call('room',undefined,administrator,w.id)).data;
+   expect(room.board.napplets.map((p:any)=>p.id)).toContain(fork.project.id);
+   const opened=(await call(`projects/${fork.project.id}/edit`,undefined,administrator,w.id));expect(opened.status).toBe(200);expect(opened.data.permissions).toMatchObject({edit:true,consent:false,administrative:true});
+ }
+ expect((await call(`projects/${fork.project.id}/rename`,{title:'Owner managed participant fork'},owner,w.id)).status).toBe(200);
+ expect((await call(`projects/${fork.project.id}/rename`,{title:'Site admin managed participant fork'},admin,w.id)).status).toBe(200);
+ const scoped=new Workshop(app.db,app.workshop.assets,w.id),latest=scoped.addRevision(app.db.query('SELECT * FROM projects WHERE id=?').get(fork.project.id),app.workshop.assets.put('<!doctype html><html><body>Admin activation fixture</body></html>'),forker.member.pubkey);
+ expect((await call(`projects/${fork.project.id}/activate`,{revisionId:fork.project.current_revision,expectedRevisionId:latest},admin,w.id)).status).toBe(200);
+ expect((await call(`projects/${fork.project.id}/share`,{revisionId:fork.project.current_revision},owner,w.id)).status).toBe(200);
+ expect((await call(`projects/${fork.project.id}/consent`,{revisionId:fork.project.current_revision,granted:true},owner,w.id)).status).toBe(404);
+ expect((await call(`projects/${fork.project.id}`,undefined,forker,w.id)).data.project.owner).toBe(forker.member.pubkey);
+ expect((app.db.query('SELECT action FROM project_admin_audit WHERE project_id=?').all(fork.project.id) as any[]).map(row=>row.action)).toEqual(expect.arrayContaining(['rename','activate','share']));
+
+ config.followup={projectId:fork.project.id,ownerPubkey:forker.member.pubkey,conversationKey:fork.project.conversation_id,directory:'/fixed',builderRoot:dir+'/napplets',fileVersions:true,replacementEnabled:true,brokerUrl:'http://127.0.0.1:1',credentialFile:'/missing',origin:'https://autopilot.test',definitionId:'fork-admin-test',callbackUrl:origin+'/api/v1/pipeline/callback',appPubkey:'c'.repeat(64),approvedRequestId:''};
+ for(const [administrator,requestId] of [[owner,'owner-admin-edit'],[admin,'site-admin-edit']] as const){
+   const response=await call(`host/projects/${fork.project.id}/requests`,{requestId,prompt:'Audited administrator change',operatorReason:'Administrator support requested',expectedRevisionId:fork.project.current_revision},administrator,w.id);
+   expect(response.status).toBe(202);expect(response.data.hostSubmitted).toBe(true);
+   expect(app.db.query('SELECT actor,project_owner FROM host_request_audit WHERE request_id=?').get(requestId)).toEqual({actor:administrator.member.pubkey,project_owner:forker.member.pubkey});
+   app.db.run("UPDATE requests SET status='succeeded' WHERE id=?",[requestId]);
+ }
+
+ expect((await call('projects',{forkProjectId:source.project.id,idempotencyKey:'pending-denied'},pending,w.id)).status).toBe(403);
+ await call(`host/members/${forker.member.pubkey}`,{state:'banned',allowance:0},owner,w.id);
+ expect((await call('projects',{forkProjectId:source.project.id,idempotencyKey:'banned-denied'},forker,w.id)).status).toBe(403);
+ await call(`host/projects/${source.project.id}`,{hidden:true},owner,w.id);
+ const admitted=await login();await call('workshops/join',{},admitted,w.id);
+ expect((await call('projects',{forkProjectId:source.project.id,idempotencyKey:'hidden-denied'},admitted,w.id)).status).toBe(404);
+ expect([403,404]).toContain((await call('projects',{forkProjectId:source.project.id,idempotencyKey:'cross-denied'},admitted,other.id)).status);
+ expect((await call(`projects/${source.project.id}/edit`,undefined,admin,other.id)).status).toBe(404);
+ expect((await call(`projects/${source.project.id}/edit`,undefined,admin,w.id)).status).toBe(200);
 });
 
 test('workshop list includes only admitted memberships and owned workshops; administrators see every workshop', async () => {

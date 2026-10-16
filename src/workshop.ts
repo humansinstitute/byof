@@ -19,6 +19,7 @@ import { now, type Member } from "./auth.ts";
 import { starters } from "./starters.ts";
 export class Workshop {
   static datasetProviders=new WeakMap<Database,(workshop:Workshop,member:Member)=>Promise<any>>();
+  static siteAdminProviders=new WeakMap<Database,(pubkey:string)=>boolean>();
   get datasetDiscovery(){const provider=Workshop.datasetProviders.get(this.db);return provider? (member:Member)=>provider(this,member):undefined;}
   datasetSnapshot?: any;
   storageRequired=false;
@@ -28,6 +29,16 @@ export class Workshop {
   get legacy():boolean { return this.id === (this.db.query('SELECT workshop_id FROM workshop_identity WHERE id=1').get() as any).workshop_id; }
   roomRow():any { return this.legacy ? {...this.db.query('SELECT * FROM room WHERE id=1').get() as any,...this.db.query('SELECT owner,tower_id,pictures_json FROM workshops WHERE id=?').get(this.id) as any,id:this.id} : this.db.query('SELECT * FROM workshops WHERE id=?').get(this.id); }
   membership(pubkey:string):any { return this.legacy ? this.db.query('SELECT state,allowance FROM members WHERE pubkey=?').get(pubkey) : this.db.query('SELECT state,allowance FROM workshop_members WHERE workshop_id=? AND pubkey=?').get(this.id,pubkey); }
+  isSiteAdmin(pubkey:string):boolean { return Workshop.siteAdminProviders.get(this.db)?.(pubkey)??false; }
+  projectOwnerAccess(pubkey:string):any {
+    const membership=this.membership(pubkey);
+    if(membership?.state==='admitted')return membership;
+    if(this.roomRow().owner===pubkey||this.isSiteAdmin(pubkey)){
+      const account=this.db.query('SELECT allowance FROM members WHERE pubkey=?').get(pubkey) as any;
+      return {state:'admitted',allowance:account?.allowance??20,administrative:true};
+    }
+    return membership;
+  }
   scoped(member:Member):Member { const room=this.roomRow(); demand(room,404,'Workshop not found'); const membership=this.membership(member.pubkey);return {...member,workshopId:this.id,workshopOwner:room.owner===member.pubkey,host:!!member.admin || room.owner===member.pubkey,state:membership?.state||'not-joined',allowance:membership?.allowance||0}; }
   join(member:Member,body:any) {
     return this.db.transaction(()=>{
@@ -41,7 +52,7 @@ export class Workshop {
     }).immediate();
   }
 
-  charge(pubkey:string) { if(this.legacy)this.db.run('UPDATE members SET allowance=allowance-1 WHERE pubkey=?',[pubkey]);else this.db.run('UPDATE workshop_members SET allowance=allowance-1 WHERE workshop_id=? AND pubkey=?',[this.id,pubkey]); }
+  charge(pubkey:string) { if(this.legacy||!this.membership(pubkey)&&this.projectOwnerAccess(pubkey)?.administrative)this.db.run('UPDATE members SET allowance=allowance-1 WHERE pubkey=?',[pubkey]);else this.db.run('UPDATE workshop_members SET allowance=allowance-1 WHERE workshop_id=? AND pubkey=?',[this.id,pubkey]); }
   guidance() { if(this.legacy)return loadBuilderPrompt(this.db);const r=this.db.query('SELECT * FROM workshop_prompts WHERE workshop_id=?').get(this.id) as any;return {revision:r.revision,text:r.text,agentName:r.agent_name,updatedAt:r.updated_at}; }
 
   admitted(member: Member) { demand(member.host || member.state === "admitted", 403, member.state === "banned" ? "Your access is banned in this room" : "Waiting for host admission"); }
@@ -50,11 +61,17 @@ export class Workshop {
     this.admitted(member); const project = this.db.query("SELECT * FROM projects WHERE id=?").get(id) as any;
     demand(project && project.workshop_id===this.id && (project.owner === member.pubkey || (!own && member.host)), 404, "Project not found"); return project;
   }
+  editableProject(member:Member,id:string):any { return this.project(member,id,!member.host); }
+  auditAdminAction(member:Member,project:any,action:string,detail:unknown) {
+    if(project.owner===member.pubkey)return;
+    this.host(member);
+    this.db.run('INSERT INTO project_admin_audit VALUES(?,?,?,?,?,?,?,?)',[crypto.randomUUID(),this.id,project.id,project.owner,member.pubkey,action,JSON.stringify(detail),now()]);
+  }
   room(member: Member) {
     const room = {...this.roomRow(),pictures:JSON.parse(this.roomRow().pictures_json||'[]')};
     if (!member.host && member.state !== "admitted") return { room, projects: [], gallery: [], starters: starters.map(({ source, ...s }) => s) };
     const donationQr=room.lightning?encodeQR('lightning:'+room.lightning,'data-url',{scale:6,border:4,ecc:'medium'}):null;
-    return { room, donationQr, board:boardSnapshot(this), projects: this.db.query("SELECT * FROM projects WHERE owner=? AND workshop_id=? ORDER BY created_at DESC").all(member.pubkey,this.id).map((p:any)=>({...p,appVersionUrl:this.versionLink(p.id,p.current_revision)})), gallery: this.db.query("SELECT p.id,p.title,p.description,p.shared_revision,p.origin_project,p.origin_revision,m.name author,p.owner authorPubkey,r.number,r.source_hash FROM projects p JOIN members m ON m.pubkey=p.owner JOIN revisions r ON r.id=p.shared_revision WHERE p.workshop_id=? AND p.hidden=0 ORDER BY p.created_at DESC").all(this.id).filter((p:any)=>this.membership((this.db.query('SELECT owner FROM projects WHERE id=?').get(p.id) as any).owner)?.state==='admitted'), starters: starters.map(({ source, ...s }) => s) };
+    return { room, donationQr, board:boardSnapshot(this), projects: this.db.query("SELECT * FROM projects WHERE owner=? AND workshop_id=? ORDER BY created_at DESC").all(member.pubkey,this.id).map((p:any)=>({...p,appVersionUrl:this.versionLink(p.id,p.current_revision)})), gallery: this.db.query("SELECT p.id,p.title,p.description,p.shared_revision,p.origin_project,p.origin_revision,m.name author,p.owner authorPubkey,r.number,r.source_hash FROM projects p JOIN members m ON m.pubkey=p.owner JOIN revisions r ON r.id=p.shared_revision WHERE p.workshop_id=? AND p.hidden=0 ORDER BY p.created_at DESC").all(this.id).filter((p:any)=>this.projectOwnerAccess(p.authorPubkey)?.state==='admitted'), starters: starters.map(({ source, ...s }) => s) };
   }
   revision(projectId: string, revisionId: string): any { const revision = this.db.query("SELECT * FROM revisions WHERE id=? AND project_id=?").get(revisionId, projectId) as any; demand(revision, 404, "Revision not found"); return revision; }
   addRevision(project: any, sourceHash: string, actor: string, restoredFrom: string | null = null) {
@@ -85,7 +102,7 @@ export class Workshop {
       const previous=this.db.query('SELECT project_id,source_project FROM project_forks WHERE workshop_id=? AND actor=? AND idempotency_key=?').get(this.id,member.pubkey,key) as any;
       if(previous){demand(previous.source_project===sourceId,409,'Fork request ID was already used for another Napplet');return {...this.detail(member,previous.project_id),idempotent:true};}
       const source=this.db.query('SELECT * FROM projects WHERE id=? AND workshop_id=? AND hidden=0 AND current_revision IS NOT NULL').get(sourceId,this.id) as any;
-      demand(source&&this.membership(source.owner)?.state==='admitted',404,'Napplet is no longer available to fork');
+      demand(source&&this.projectOwnerAccess(source.owner)?.state==='admitted',404,'Napplet is no longer available to fork');
       const revision=this.revision(source.id,source.current_revision);
       const count=(this.db.query('SELECT COUNT(*) n FROM projects WHERE owner=? AND workshop_id=?').get(member.pubkey,this.id) as any).n;
       demand(count<limits.projectsPerMember,409,'Project capacity reached');
@@ -107,41 +124,44 @@ export class Workshop {
     const rows=this.db.query("SELECT * FROM revisions WHERE project_id=? ORDER BY number DESC").all(id) as any[],byId=new Map(rows.map(revision=>[revision.id,revision])),activeLineage=new Set<string>();
     for(let revision=byId.get(project.current_revision);revision&&!activeLineage.has(revision.id);revision=revision.parent_id?byId.get(revision.parent_id):undefined)activeLineage.add(revision.id);
     const revisions=rows.map(revision=>({...revision,lineage_status:revision.id===project.current_revision?'active':activeLineage.has(revision.id)?'ancestor':'abandoned',appVersionUrl:this.versionLink(project.id,revision.id)}));
-    return { agentName: this.guidance().agentName, selectedBuilderEngine:loadBuilderEngine(this.db,this.id), project, artifacts, builder: builderEpoch(this,project), builderDeletion: this.db.query('SELECT id,generation,status,error,receipt_json FROM builder_deletions WHERE project_id=? ORDER BY generation DESC LIMIT 1').get(id), revisions, builderPromptRevision: this.guidance().revision, requests: this.db.query("SELECT (SELECT revision FROM request_builder_prompts WHERE request_id=r.id) builder_prompt_revision,r.id,r.prompt,r.status,r.error,r.response,r.mode,r.run_id,r.created_at,(SELECT MAX(d.created_at) FROM delivery_receipts d WHERE d.request_id=r.id) response_received_at,EXISTS(SELECT 1 FROM delivery_receipts d WHERE d.request_id=r.id AND json_extract(d.result_json,'$.error')='Completed-turn bound session unavailable') recoverable FROM requests r WHERE r.project_id=? ORDER BY r.created_at,r.rowid").all(id).map((r:any)=>({...r,attachments:requestAttachments(this,r.id),builderEngine:requestBuilderEngine(this.db,r.id),builderEngineCorrected:!!this.db.query('SELECT request_id FROM request_builder_engine_corrections WHERE request_id=?').get(r.id),...(() => {const publication=this.db.query('SELECT status,error,receipt_json FROM agent_publications WHERE request_id=?').get(r.id) as any;const recovery=this.db.query('SELECT input_json FROM request_recoveries WHERE request_id=?').get(r.id) as any;return {agentPublication:!!recovery&&JSON.parse(recovery.input_json).replacementContext?.fileBuild?.publication==='agent-tool-v1',publicationStatus:publication?.status??'none',publicationError:publication?.error??null,publishedVersion:publication?.receipt_json?JSON.parse(publication.receipt_json).version:null};})(),neverSent:neverDispatched(this.db,{...r,project_id:id}),automaticRetryExhausted:((this.db.query('SELECT attempts FROM automatic_recovery WHERE request_id=?').get(r.id) as any)?.attempts??0)>=4,recoverable:currentPreSend(this.db,{...r,project_id:id}) || currentAbandoned(this.db,r) || (r.status==='execution_uncertain' && !!this.db.query('SELECT request_id FROM request_recoveries WHERE request_id=?').get(r.id)),activity:requestActivity(this.db,r.id)})), consent: this.db.query("SELECT revision_id,granted FROM consent WHERE project_id=?").all(id) };
+    return { agentName: this.guidance().agentName, selectedBuilderEngine:loadBuilderEngine(this.db,this.id), permissions:{owner:project.owner===member.pubkey,edit:project.owner===member.pubkey||member.host,consent:project.owner===member.pubkey,administrative:project.owner!==member.pubkey&&member.host}, project, artifacts, builder: builderEpoch(this,project), builderDeletion: this.db.query('SELECT id,generation,status,error,receipt_json FROM builder_deletions WHERE project_id=? ORDER BY generation DESC LIMIT 1').get(id), revisions, builderPromptRevision: this.guidance().revision, requests: this.db.query("SELECT (SELECT revision FROM request_builder_prompts WHERE request_id=r.id) builder_prompt_revision,r.id,r.prompt,r.status,r.error,r.response,r.mode,r.run_id,r.created_at,(SELECT MAX(d.created_at) FROM delivery_receipts d WHERE d.request_id=r.id) response_received_at,EXISTS(SELECT 1 FROM delivery_receipts d WHERE d.request_id=r.id AND json_extract(d.result_json,'$.error')='Completed-turn bound session unavailable') recoverable FROM requests r WHERE r.project_id=? ORDER BY r.created_at,r.rowid").all(id).map((r:any)=>({...r,attachments:requestAttachments(this,r.id),builderEngine:requestBuilderEngine(this.db,r.id),builderEngineCorrected:!!this.db.query('SELECT request_id FROM request_builder_engine_corrections WHERE request_id=?').get(r.id),...(() => {const publication=this.db.query('SELECT status,error,receipt_json FROM agent_publications WHERE request_id=?').get(r.id) as any;const recovery=this.db.query('SELECT input_json FROM request_recoveries WHERE request_id=?').get(r.id) as any;return {agentPublication:!!recovery&&JSON.parse(recovery.input_json).replacementContext?.fileBuild?.publication==='agent-tool-v1',publicationStatus:publication?.status??'none',publicationError:publication?.error??null,publishedVersion:publication?.receipt_json?JSON.parse(publication.receipt_json).version:null};})(),neverSent:neverDispatched(this.db,{...r,project_id:id}),automaticRetryExhausted:((this.db.query('SELECT attempts FROM automatic_recovery WHERE request_id=?').get(r.id) as any)?.attempts??0)>=4,recoverable:currentPreSend(this.db,{...r,project_id:id}) || currentAbandoned(this.db,r) || (r.status==='execution_uncertain' && !!this.db.query('SELECT request_id FROM request_recoveries WHERE request_id=?').get(r.id)),activity:requestActivity(this.db,r.id)})), consent: this.db.query("SELECT revision_id,granted FROM consent WHERE project_id=?").all(id) };
   }
   versionLink(projectId:string,revisionId:string) {
     const row=this.db.query('SELECT receipt_json FROM agent_publications WHERE revision_id=? AND status=? AND request_id IN (SELECT id FROM requests WHERE project_id=?)').get(revisionId,'published',projectId) as any;
     return row?JSON.parse(row.receipt_json).url:null;
   }
   rename(member: Member, id: string, body: any) {
-    const project = this.project(member, id, true);
-    const title = text(body.title, "Napplet title", 120);
-    demand(!/[\u0000-\u001f\u007f]/u.test(title), 400, "Napplet title must be a single line");
-    demand(!this.db.query('SELECT id FROM projects WHERE workshop_id=? AND id<>? AND lower(title)=lower(?)').get(this.id,project.id,title),409,'Another Napplet already uses that name');
-    this.db.run("UPDATE projects SET title=? WHERE id=? AND workshop_id=? AND owner=?", [title, project.id, this.id, project.owner]);
-    return { project: this.project(member, id, true) };
+    return this.db.transaction(()=>{
+      const project = this.editableProject(member,id);
+      const title = text(body.title, "Napplet title", 120);
+      demand(!/[\u0000-\u001f\u007f]/u.test(title), 400, "Napplet title must be a single line");
+      demand(!this.db.query('SELECT id FROM projects WHERE workshop_id=? AND id<>? AND lower(title)=lower(?)').get(this.id,project.id,title),409,'Another Napplet already uses that name');
+      this.db.run("UPDATE projects SET title=? WHERE id=? AND workshop_id=? AND owner=?", [title, project.id, this.id, project.owner]);
+      this.auditAdminAction(member,project,'rename',{title});
+      return { project: this.editableProject(member,id) };
+    })();
   }
   restore(member: Member, id: string, body: any) {
     return this.db.transaction(() => {
-      const project = this.project(member, id, true); demand(project.current_revision === body.expectedRevisionId, 409, "Project changed; reload before restoring");
-      const revision = this.revision(id, body.revisionId); this.addRevision(project, revision.source_hash, member.pubkey, revision.id); return this.detail(member, id);
+      const project = this.editableProject(member,id); demand(project.current_revision === body.expectedRevisionId, 409, "Project changed; reload before restoring");
+      const revision = this.revision(id, body.revisionId); const restored=this.addRevision(project, revision.source_hash, member.pubkey, revision.id);this.auditAdminAction(member,project,'restore',{revisionId:revision.id,restoredRevisionId:restored});return this.detail(member, id);
     })();
   }
   activate(member: Member, id: string, body: any) {
     return this.db.transaction(() => {
-      const project=this.project(member,id,true),expected=text(body.expectedRevisionId,'Expected revision',100),revisionId=text(body.revisionId,'Revision',100);
+      const project=this.editableProject(member,id),expected=text(body.expectedRevisionId,'Expected revision',100),revisionId=text(body.revisionId,'Revision',100);
       demand(project.current_revision===expected,409,'Project changed; reload before activating this version');
       this.revision(id,revisionId);
       demand(this.db.run('UPDATE projects SET current_revision=? WHERE id=? AND current_revision=?',[revisionId,id,expected]).changes===1,409,'Project changed; reload before activating this version');
-      return this.detail(member,id);
+      this.auditAdminAction(member,project,'activate',{revisionId,previousRevisionId:expected});return this.detail(member,id);
     }).immediate();
   }
   share(member: Member, id: string, body: any) {
     return this.db.transaction(() => {
-      const project = this.project(member, id, true);
+      const project = this.editableProject(member,id);
       if (body.revisionId === null) { this.db.run("UPDATE projects SET shared_revision=NULL WHERE id=?", [id]); this.db.run("UPDATE consent SET granted=0,updated_at=? WHERE project_id=?", [now(), id]); }
       else { this.revision(id, text(body.revisionId, "Revision", 100)); demand(!project.hidden, 403, "Host has hidden this project"); this.db.run("UPDATE projects SET shared_revision=? WHERE id=?", [body.revisionId, id]); }
-      return this.detail(member, id);
+      this.auditAdminAction(member,project,'share',{revisionId:body.revisionId});return this.detail(member, id);
     })();
   }
   consent(member: Member, id: string, body: any) {
@@ -155,7 +175,7 @@ export class Workshop {
     return this.db.transaction(() => {
       demand(!['agent','engine','model','provider','builderRuntime','builderEngine','builderEngineRevision','runtime'].some(k=>Object.hasOwn(body,k)),400,'Builder engine is chosen by the administrator');
       const project = this.project(member, id, !hostOperation), requestId = text(body.requestId, "Request ID", 100);
-      const owner = this.membership(project.owner);
+      const owner = this.projectOwnerAccess(project.owner);
       demand(owner?.state === "admitted", 403, "Project owner must be admitted");
       const hostReason = hostOperation ? text(body.operatorReason, "Host execution reason", 1000) : null;
       text(body.prompt, "Instruction", limits.promptChars);
@@ -226,9 +246,9 @@ export class Workshop {
   }
   previewRevision(member: Member, id: string, revisionId: string) {
     this.admitted(member); const project = this.db.query("SELECT * FROM projects WHERE id=?").get(id) as any;
-    demand(project && project.workshop_id===this.id && (project.owner === member.pubkey || member.host || ((project.current_revision === revisionId || project.shared_revision === revisionId) && !project.hidden && this.membership(project.owner)?.state === "admitted")), 404, "Preview not found");
+    demand(project && project.workshop_id===this.id && (project.owner === member.pubkey || member.host || ((project.current_revision === revisionId || project.shared_revision === revisionId) && !project.hidden && this.projectOwnerAccess(project.owner)?.state === "admitted")), 404, "Preview not found");
     return this.revision(id,revisionId);
   }
   preview(member:Member,id:string,revisionId:string){return this.assets.get(this.previewRevision(member,id,revisionId).source_hash);}
-  publicationCandidates(member: Member) { this.host(member); return this.db.query("SELECT p.id,p.title,p.shared_revision,r.number,r.source_hash,m.name author,p.owner authorPubkey,p.origin_project,p.origin_revision FROM projects p JOIN revisions r ON r.id=p.shared_revision JOIN members m ON m.pubkey=p.owner JOIN consent c ON c.project_id=p.id AND c.revision_id=r.id WHERE p.hidden=0 AND p.workshop_id=? AND c.granted=1").all(this.id).filter((p:any)=>this.membership((this.db.query('SELECT owner FROM projects WHERE id=?').get(p.id) as any).owner)?.state==='admitted'); }
+  publicationCandidates(member: Member) { this.host(member); return this.db.query("SELECT p.id,p.title,p.shared_revision,r.number,r.source_hash,m.name author,p.owner authorPubkey,p.origin_project,p.origin_revision FROM projects p JOIN revisions r ON r.id=p.shared_revision JOIN members m ON m.pubkey=p.owner JOIN consent c ON c.project_id=p.id AND c.revision_id=r.id WHERE p.hidden=0 AND p.workshop_id=? AND c.granted=1").all(this.id).filter((p:any)=>this.projectOwnerAccess(p.authorPubkey)?.state==='admitted'); }
 }
