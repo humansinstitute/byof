@@ -72,10 +72,12 @@ a new channel. Restarting the server invalidates channels, while retaining data.
 
 The transport uses an opaque-origin `postMessage` readiness signal and one
 transferred `MessageChannel`, protocol version 1. The host accepts only registered
-iframe windows with its own authenticated preview URL and exact sandbox. A server-issued, one-use preview document identifier binds the handshake to the
+iframe windows whose trusted parent metadata names the current Canvas, project,
+revision and source hash and whose sandbox is exact. Both direct preview navigation
+and cached-source assembly use a fresh server runtime response. A server-issued, one-use preview document identifier binds the handshake to the
 actual authenticated document load; it expires after five minutes and cannot be
 reused for another user, session, workshop, project or revision. Each
-channel is bound to that window, URL/project/revision, workshop and current user.
+channel is bound to that window, project/revision/hash, workshop and current user.
 Removal, navigation, account/workshop changes and logout close it and cancel
 pending consent. The host's **Revoke Napplet permissions** button closes current
 channels; reload/reopen to reconnect and request fresh consent. No iframe request

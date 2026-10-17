@@ -10,7 +10,7 @@ import { sha256 } from './assets.ts';
 import { uploadBoardImage, readBoardImage } from './workshop-images.ts';
 import { CanvasRuntime } from './canvas-runtime.ts';
 import { NappletData } from './napplet-data.ts';
-import { injectNappletBridge } from './napplet-runtime.ts';
+import { injectNappletBridge, nappletRuntimeBootstrap, nappletRuntimeShell } from './napplet-runtime.ts';
 import { installProfileStore, saveNostrProfile, knownProfiles } from './profile-store.ts';
 import { TowerConnect } from './tower-connect.ts';
 import { installSite, Site } from './site.ts';
@@ -40,7 +40,7 @@ import {authorizeWorkshopFollowup} from './pipeline/workshop-prepare.ts';
 import {authorizeConfigurableBuilder} from './pipeline/configurable-prepare.ts';
 // Sandboxed frames have an opaque origin. The parent binds capability messages to the exact frame;
 // the existing Escape/focus signals remain separate from the capability channel.
-const previewEscapeBridge = `<script>document.addEventListener('keydown',function(event){if(event.key==='Escape'){event.preventDefault();parent.postMessage({type:'freedom-preview-escape'},'*');}},true);document.addEventListener('pointerdown',function(){parent.postMessage({type:'freedom-preview-focus'},'*');},true);document.addEventListener('focusin',function(){parent.postMessage({type:'freedom-preview-focus'},'*');});</script>`;
+const previewEscapeBridge = nappletRuntimeBootstrap('00000000-0000-0000-0000-000000000000').suffix;
 export function application(rootConfig: Config, fixtures?: {datasetTransport:(scope:any)=>import('./tower-storage-client.ts').StorageTransport}) {
   const config=rootConfig;
   const db = openDatabase(config.dataDir), auth = new Auth(db, config), workshop = new Workshop(db, new Assets(join(config.dataDir, "objects")));
@@ -151,7 +151,7 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport:(sc
       // Alternate managed port/mesh entry pages move here before authentication.
       if (path === "/api/v1/browser-origin" && method === "GET") return json({ origin });
       if (["/health","/api/health"].includes(path) && method === "GET") {const capable=workshopBuilders(config.followup);const publicationAvailable=!!capable?.agentPublication&&!!(config.storage||config.managedStorage||config.storageTemplates?.length||config.workshopStorage?.length);return json({ status: "ok", service: "liquid-freedom", version: config.version, build: await Bun.file(join(import.meta.dir, "../tmp/build/assets.json")).json().catch(() => null), hostConfigured: !!config.hostPubkey, generation: { available: !!capable?.memberWorkshops && !capable.suspended, operatorApprovedBuildAvailable: !!config.operatorBuild, ownerProjectFollowupAvailable: !!config.followup && !config.followup.suspended, ownerProjectFollowupSuspended: !!config.followup?.suspended, reason: "Installed workshop builders require active admission, project ownership and available allowance" }, publication: { available: publicationAvailable, reason: publicationAvailable?"Agent-tool publication is installed; each Canvas still requires its verified private storage binding.":"Awaiting installed agent-tool publication and managed storage authority" }, limits });}
-      if (["/", "/app.js", "/activity-time.js", "/chat-attachments.js", "/invitation-url.js", "/napplet-host.js", "/canvas-host.js", "/identity.js", "/style.css"].includes(path) && method === "GET") {
+      if (["/", "/app.js", "/activity-time.js", "/chat-attachments.js", "/invitation-url.js", "/napplet-host.js", "/napplet-cache.js", "/canvas-host.js", "/identity.js", "/style.css"].includes(path) && method === "GET") {
         const file = Bun.file(join(import.meta.dir, "../public", path === "/" ? "index.html" : path.slice(1)));
         demand(await file.exists(), 503, "Managed build required");
         return new Response(file, { headers: { ...security, "cache-control": "no-store", "content-type": path.endsWith(".js") ? "application/javascript" : path.endsWith(".css") ? "text/css" : "text/html", "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https: wss://relay.primal.net wss://nos.lol wss://relay.damus.io wss://purplepag.es; frame-src 'self'; img-src 'self' https: data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'" } });
@@ -256,7 +256,7 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport:(sc
         if(route?.fileVersions&&!route.remotePreparation)refreshProjectGuidance(route.directory!,workshop.guidance());
         return json({ ...created, generationAvailable: followupAvailable(created.project,config.followup), nativeDeletionAvailable:false },'idempotent' in created&&created.idempotent?200:201);
       }
-      const project = path.match(/^\/api\/v1\/projects\/([^/]+)(?:\/(activate|restore|share|consent|requests|preview|rename|edit))?$/);
+      const project = path.match(/^\/api\/v1\/projects\/([^/]+)(?:\/(activate|restore|share|consent|requests|preview|payload|runtime|rename|edit))?$/);
       if (project) {
         const [, id, action] = project;
         if (!action && method === "GET") return json({ ...workshop.detail(member, id!), execution: executionLinks(workshop,member,id!,config.followup), nativeDeletionAvailable: !!config.followup?.nativeDeletion && !config.followup.suspended && followupAvailable(workshop.project(member,id!),config.followup), generationAvailable: followupAvailable(workshop.project(member,id!),config.followup)&&runtimeAvailable(config.followup,loadBuilderEngine(db,workshop.id).runtime), storageReady:workshop.storageReady, generationReason: !runtimeAvailable(config.followup,loadBuilderEngine(db,workshop.id).runtime)?'The selected builder engine awaits platform activation; your request and app remain saved.':!workshop.storageReady ? 'Private storage needs authorization. Questions are available; app changes wait for the site administrator to connect storage.' : config.followup?.suspended && id === config.followup.projectId ? "This project conversation is awaiting native resume activation. Requests are saved without execution." : null });
@@ -272,6 +272,22 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport:(sc
           demand(auth.sessionActive(session.sessionHash),401,'Session expired during preview load');
           const documentId=nappletData.issueDocument(workshop,member,session.sessionHash,id!,revisionId);
           return new Response(injectNappletBridge(source??workshop.assets.get(revision.source_hash),documentId) + previewEscapeBridge, { headers: { ...security, "content-type": "text/html", "content-security-policy": previewPolicy, "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=()" } });
+        }
+        if (action === 'payload' && method === 'GET') {
+          const revisionId=url.searchParams.get('revision')||'',revision=workshop.previewRevision(member,id!,revisionId);
+          const hasRemote=db.query('SELECT revision_id FROM remote_versions WHERE revision_id=?').get(revisionId);
+          demand(!hasRemote||config.storage,503,'The managed private storage connection is unavailable');
+          const source=config.storage?await remotePreview(workshop,config.storage,revisionId):null;
+          demand(auth.sessionActive(session.sessionHash),401,'Session expired during payload load');
+          const bytes=new TextEncoder().encode(source??workshop.assets.get(revision.source_hash));
+          demand(sha256(bytes)===revision.source_hash,500,'Immutable payload verification failed');
+          return new Response(bytes,{headers:{...security,'content-type':'text/html; charset=utf-8','x-napplet-source-sha256':revision.source_hash}});
+        }
+        if (action === 'runtime' && method === 'GET') {
+          const revisionId=url.searchParams.get('revision')||'',revision=workshop.previewRevision(member,id!,revisionId);
+          demand(auth.sessionActive(session.sessionHash),401,'Session expired during runtime load');
+          const documentId=nappletData.issueDocument(workshop,member,session.sessionHash,id!,revisionId);
+          return new Response(nappletRuntimeShell(documentId,revision.source_hash),{headers:{...security,'content-type':'text/html','content-security-policy':previewPolicy,'permissions-policy':'camera=(), microphone=(), geolocation=(), payment=()'}});
         }
         if (action === "rename" && method === "POST") return json(workshop.rename(member, id!, body));
         if (action === "activate" && method === "POST") return json(workshop.activate(member, id!, body));

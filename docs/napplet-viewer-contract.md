@@ -29,8 +29,42 @@ load the new revision. Modern browsers also preserve frames when cards reorder
 through `moveBefore`; older browsers can reload a frame if its card is reordered.
 
 Sandbox permissions remain `allow-scripts allow-forms`, with no same-origin
-privilege and no-referrer policy. The preview response's existing content security
-policy denies network connections. No new app or storage privileges are introduced.
+privilege and no-referrer policy. The preview response and the cache transport's
+fresh runtime shell use the same content security policy, which denies network connections; the iframe
+also explicitly denies camera, microphone, geolocation and payment. No new app or
+storage privileges are introduced.
+
+## Immutable payload cache
+
+The authenticated room/project response advertises each visible revision and its
+immutable SHA-256 source hash. Cache Storage is consulted only after that room
+access check. On a miss, the payload route repeats the access checks before
+returning source bytes. Before any cached or downloaded source can execute, the
+no-store runtime endpoint rechecks the current session, Canvas membership, project
+visibility and exact revision access and issues a new one-use document binding.
+Neither route treats possession of cached bytes as authorization.
+
+Source HTML is retrieved separately through the authenticated payload endpoint.
+The browser verifies both its advertised hash header and the SHA-256 of the bytes
+before execution, then stores only those bytes in Cache Storage under a
+schema-versioned content-hash key. A later load may reuse matching verified bytes,
+including identical bytes from a fork, but still obtains a fresh runtime binding
+for the fork's own project/revision/workshop identity. Session cookies, CSRF and
+capability tokens, document IDs, consent and bridge state are never cached.
+
+The freshly authorized runtime shell is a small iframe response with the existing
+CSP and permissions headers. It requests the already verified source from the
+trusted parent through a one-use `MessageChannel`, rehashes it inside the opaque
+frame, and replaces itself with the source plus that load's fresh bridge. The
+source transfer and document binding are ephemeral and never enter Cache Storage.
+
+The cache keeps at most 64 payloads and removes oldest stored entries after a
+successful write; browsers may evict them sooner. This cache is separate from
+Napplet data storage, so cleanup cannot delete user data. Cache absence, quota or
+operation failure, corrupt bytes, or a payload download failure falls back to the
+existing authenticated `/preview` navigation and its clear server error behavior.
+Room access and a fresh bridge remain online requirements; this is not offline
+execution.
 
 Validate with `bun run check`, `bun test ./tests ./src` and
 `bun scripts/workshop-board-acceptance.ts`. The earlier embeds acceptance script
@@ -60,4 +94,4 @@ audit rows for rename, activation, restore and sharing. Host conversation change
 continue through the separately audited host-follow-up route. Public publication
 consent remains owner-only and cannot be supplied by an administrator.
 
-Authenticated preview responses inject the [Napplet bridge v1](napplet-bridge-api.md) before app scripts. Identity consent, participant signing and durable per-user project storage travel over a channel bound to the existing frame; sandbox and network-denying CSP stay unchanged. Removing/replacing a frame revokes its grants, while resize/minimize/pop-out preserve its channel with the document.
+Authenticated preview responses and fresh runtime bootstraps inject the [Napplet bridge v1](napplet-bridge-api.md) before app scripts. Identity consent, participant signing and durable per-user project storage travel over a channel bound to the existing frame; sandbox and network-denying CSP stay unchanged. Removing/replacing a frame revokes its grants, while resize/minimize/pop-out preserve its channel with the document.

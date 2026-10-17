@@ -18,7 +18,7 @@ try{
     const request=route.request(),url=new URL(request.url()),isParticipant=url.origin===participantOrigin;
     if(url.pathname==='/'){await route.fulfill({contentType:'text/html',body:await Bun.file('public/index.html').text()});return;}
     if(url.pathname==='/app.js'){await route.fulfill({contentType:'application/javascript',body:fixtureSource});return;}
-    if(['/activity-time.js','/chat-attachments.js','/invitation-url.js','/napplet-host.js','/canvas-host.js','/identity.js'].includes(url.pathname)){await route.fulfill({contentType:'application/javascript',body:await Bun.file('public'+url.pathname).text()});return;}
+    if(['/activity-time.js','/chat-attachments.js','/invitation-url.js','/napplet-host.js','/napplet-cache.js','/canvas-host.js','/identity.js'].includes(url.pathname)){await route.fulfill({contentType:'application/javascript',body:await Bun.file('public'+url.pathname).text()});return;}
     if(url.pathname==='/style.css'){await route.fulfill({contentType:'text/css',body:await Bun.file('public/style.css').text()});return;}
     if(url.pathname==='/api/v1/browser-origin'){await route.fulfill({json:{origin:url.origin}});return;}
     if(url.pathname==='/api/v1/workshops'&&request.method()==='GET'){

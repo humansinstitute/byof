@@ -15,10 +15,11 @@ test('Canvas Napplet frames defer loading until visible and minimized frames sta
   expect(source).toContain("rootMargin:'160px'");
   expect(source).toContain('maxConcurrentNappletLoads=3');
   expect(source).toContain('activeNappletLoads<maxConcurrentNappletLoads');
-  expect(source).toContain("minimized ? '<p class=\"napplet-sleeping\">Restore this Napplet to load it.</p>' : viewerMarkup");
+  expect(source).toContain("minimized ? 'inert aria-hidden=\"true\"' : ''");
+  expect(source).toContain("revision ? viewerMarkup");
   expect(source).toContain('armVisibleNapplets();');
 });
 
 test('room refresh patching preserves an already loaded deferred frame', () => {
-  expect(source).toContain("match.tagName==='IFRAME'&&attr.name==='src'&&next.dataset.src===match.getAttribute('src')");
+  expect(source).toContain("match.tagName==='IFRAME'&&['src','data-loading','data-loaded','data-cache-hit','data-runtime-url','data-runtime-binding','data-runtime-ready'].includes(attr.name)&&next.dataset.src===match.dataset.src");
 });

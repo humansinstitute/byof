@@ -10,7 +10,8 @@ export function installNappletHost(context) {
   const allMethods=[...METHODS,...canvas.methods];
   const frames=new Map(), retired=new WeakMap(); let consent=null, signingPending=false;
   function stamp() { const c=context(); return c.member?`${c.member.pubkey}:${c.workshop}`:''; }
-  function valid(b) { return !b.closed && b.frame.isConnected && b.frame.contentWindow===b.window && b.frame.getAttribute('src')===b.src && b.frame.getAttribute('sandbox')==='allow-scripts allow-forms' && (!b.expires||Date.now()<b.expires) && stamp()===b.stamp; }
+  function frameKey(frame){return [frame.dataset.workshop,frame.dataset.project,frame.dataset.revision,frame.dataset.sourceHash,frame.dataset.src,frame.getAttribute('src')].join(':');}
+  function valid(b) { return !b.closed && b.frame.isConnected && b.frame.contentWindow===b.window && frameKey(b.frame)===b.key && b.frame.getAttribute('sandbox')==='allow-scripts allow-forms' && (!b.expires||Date.now()<b.expires) && stamp()===b.stamp; }
   function assert(b) { if(!valid(b))throw error('STALE','Frame or account changed; reload the Napplet'); }
   async function backend(b,action,body,signal) {
     assert(b);
@@ -28,7 +29,7 @@ export function installNappletHost(context) {
   function close(b) {
     if(b.closed)return;
     b.relays?.forEach(r=>r.close()); b.relays?.clear(); clearInterval(b.leaseTimer);
-    b.closed=true; retired.set(b.frame,b.src); b.port?.postMessage({type:'close'}); b.port?.close();
+    b.closed=true; retired.set(b.frame,b.key); b.port?.postMessage({type:'close'}); b.port?.close();
     b.controllers.forEach(c=>c.abort());
     if(consent?.binding===b)consent.cancel();
     release(b);
@@ -36,16 +37,15 @@ export function installNappletHost(context) {
   function sync() {
     for(const [frame,b] of frames)if(!valid(b)){close(b);frames.delete(frame);}
     for(const frame of document.querySelectorAll('iframe[data-napplet]'))if(!frames.has(frame)){
-      const c=context();if(!c.member||!c.workshop||retired.get(frame)===frame.getAttribute('src'))continue;
-      const url=new URL(frame.src,location.href),match=url.pathname.match(/^\/api\/v1\/projects\/([^/]+)\/preview$/);
-      if(url.origin!==location.origin||!match||url.searchParams.get('workshop')!==c.workshop||frame.getAttribute('sandbox')!=='allow-scripts allow-forms')continue;
-      const b={frame,window:frame.contentWindow,src:frame.getAttribute('src'),stamp:stamp(),workshop:c.workshop,user:c.member.pubkey,project:decodeURIComponent(match[1]),revision:url.searchParams.get('revision'),closed:false,loaded:false,controllers:new Set(),inflight:0,seen:0,lastId:0,identityGranted:false,relays:new Map(),relaySequence:0,unacked:new Map()};
+      const c=context(),key=frameKey(frame);if(!c.member||!c.workshop||frame.dataset.runtimeBinding!=='true'||retired.get(frame)===key)continue;
+      if(frame.dataset.workshop!==c.workshop||!/^[a-f0-9-]{36}$/.test(frame.dataset.project||'')||!/^[a-f0-9-]{36}$/.test(frame.dataset.revision||'')||!/^[a-f0-9]{64}$/.test(frame.dataset.sourceHash||'')||frame.getAttribute('sandbox')!=='allow-scripts allow-forms')continue;
+      const b={frame,window:frame.contentWindow,key,stamp:stamp(),workshop:c.workshop,user:c.member.pubkey,project:frame.dataset.project,revision:frame.dataset.revision,closed:false,loaded:false,controllers:new Set(),inflight:0,seen:0,lastId:0,identityGranted:false,relays:new Map(),relaySequence:0,unacked:new Map()};
       frames.set(frame,b);
       frame.addEventListener('load',()=>{if(b.loaded){close(b);}b.loaded=true;});
     }
     revoke.hidden=![...frames.values()].some(b=>valid(b));
   }
-  new MutationObserver(sync).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src','sandbox']});
+  new MutationObserver(sync).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src','sandbox','data-loaded','data-runtime-binding','data-project','data-revision','data-source-hash','data-workshop']});
   setInterval(sync,500);
   function ask(b,kind,event,signal) {
     assert(b); if(consent)throw error('BUSY','Another permission request is open');

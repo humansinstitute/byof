@@ -2,6 +2,7 @@ import {test,expect,beforeEach,afterEach} from 'bun:test';
 import {application} from '../src/application.ts';
 import {generateSecretKey,getPublicKey,finalizeEvent} from 'nostr-tools';
 import {mkdtempSync,rmSync} from 'node:fs';
+import {sha256} from '../src/assets.ts';
 const origin='https://board.test';
 let app:ReturnType<typeof application>,dir:string,hostKey:Uint8Array;
 type Account={cookie:string;csrf:string;member:any};
@@ -33,6 +34,19 @@ test('active board follows completed checkpoints, excludes hidden/banned and exp
  await call('host/projects/'+p.id,host,{hidden:false});await call('host/members/'+a.member.pubkey,host,{state:'banned',allowance:20});
  await call('host/projects/'+p.id,host,{hidden:false});expect((await room(b)).board.napplets).toEqual([]);expect((await call(`projects/${p.id}/preview?revision=${latest}`,b)).status).toBe(404);
  expect((await room(a)).board).toBeUndefined();
+});
+test('payload bytes stay immutable while every runtime load rechecks access and issues a fresh document binding',async()=>{
+ const {host,a,b}=await setup(),p=await create(a),source=app.workshop.preview(app.auth.member(a.member.pubkey),p.id,p.current_revision);
+ const route=`projects/${p.id}`,query=`?workshop=${app.site.legacy()}&revision=${p.current_revision}`;
+ const one=await call(route+'/runtime'+query,b),two=await call(route+'/runtime'+query,b);
+ expect(one.status).toBe(200);expect(two.status).toBe(200);expect(one.data).toContain('freedom-napplet-source-request');expect(one.data).toContain(sha256(source));
+ const binding=(html:string)=>{const encoded=html.match(/injection=atob\("([^"]+)"\)/)?.[1];expect(encoded).toBeTruthy();return Buffer.from(encoded!,'base64').toString().match(/documentId:("[^"]+")/)?.[1];};
+ expect(binding(one.data)).toBeTruthy();expect(binding(one.data)).not.toBe(binding(two.data));expect(one.data).not.toContain(b.cookie);
+ const payload=await app.handle(new Request(origin+'/api/v1/'+route+'/payload'+query,{headers:{cookie:b.cookie,'x-workshop-id':app.site.legacy()}}));
+ expect(payload.status).toBe(200);expect(payload.headers.get('cache-control')).toBe('no-store');expect(payload.headers.get('x-napplet-source-sha256')).toBe(sha256(source));expect(await payload.text()).toBe(source);
+ await call('host/projects/'+p.id,host,{hidden:true});expect((await call(route+'/runtime'+query,b)).status).toBe(404);
+ await call('host/projects/'+p.id,host,{hidden:false});await call('host/members/'+a.member.pubkey,host,{state:'banned',allowance:20});expect((await call(route+'/runtime'+query,b)).status).toBe(404);
+ await call('host/members/'+a.member.pubkey,host,{state:'admitted',allowance:20});app.db.run('UPDATE sessions SET expires_at=0 WHERE pubkey=?',[b.member.pubkey]);expect((await call(route+'/runtime'+query,b)).status).toBe(401);
 });
 test('only genuine scoped hosts can persist layout; CAS rejects simultaneous and stale saves; personal fields never enter storage',async()=>{
  const {host,a,b}=await setup();await create(a);const board=(await room(host)).board;
