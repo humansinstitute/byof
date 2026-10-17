@@ -150,7 +150,8 @@ summary{cursor:pointer;font-weight:700}
 .signup-primary{margin-top:24px;padding:24px;border:2px solid var(--ink);border-top:6px solid var(--orange);background:var(--soft)}
 .signup-primary h2{margin-bottom:10px}
 .signup-primary p{margin:10px 0}
-.signup-primary .notice{margin:14px 0 0}
+.signup-primary .notice,.signup-primary .warning{margin:14px 0 0}
+.signup-primary .warning{color:#7d2b21}
 .signup-primary button{width:100%;margin-top:18px}
 .signup-fallback{margin-top:28px;padding-top:20px;border-top:1px solid var(--line)}
 .signup-fallback summary{color:var(--muted);font-size:14px}

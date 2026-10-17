@@ -14,39 +14,34 @@ const checks:any[]=[];
 async function openSignup(context:BrowserContext){
  const page=await context.newPage(),errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
  await page.goto(server.url.href);await page.getByRole('button',{name:'Create a New Profile',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Create a lasting Nostr profile',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{name:'Create a Nostr profile',exact:true})).toBeVisible();
  return {page,errors};
 }
 async function expectSignupLayout(page:Page,width:number){
- const primary=page.getByRole('button',{name:'Continue with Nostr signer',exact:true}),fallback=page.locator('.signup-fallback');
- await expect(page.getByText('Freedom Tools never receives your private key.',{exact:true})).toBeVisible();
- await expect(page.getByText(/create a new key or import your existing key in the signer/)).toBeVisible();
+ const primary=page.getByRole('button',{name:'Generate local key and continue',exact:true}),fallback=page.locator('.signup-fallback');
+ await expect(page.getByRole('heading',{name:'Generate a throwaway key',exact:true})).toBeVisible();
+ await expect(page.getByText(/save it only in this browser session/)).toBeVisible();
+ await expect(page.getByText('Local and not recoverable.',{exact:false})).toBeVisible();
  expect(await primary.evaluate(element=>element.classList.contains('primary'))).toBe(true);
- expect(await page.evaluate(()=>{const a=document.querySelector('[data-a="extension"]'),b=document.querySelector('.signup-fallback');return !!a&&!!b&&!!(a.compareDocumentPosition(b)&Node.DOCUMENT_POSITION_FOLLOWING);})).toBe(true);
+ expect(await page.evaluate(()=>{const a=document.querySelector('[data-a="temporary"]'),b=document.querySelector('.signup-fallback');return !!a&&!!b&&!!(a.compareDocumentPosition(b)&Node.DOCUMENT_POSITION_FOLLOWING);})).toBe(true);
  expect((await primary.boundingBox())!.y).toBeLessThan((await fallback.boundingBox())!.y);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
- checks.push({width,primaryFirst:true,privateKeyCustody:true,responsive:true});
+ checks.push({width,localThrowawayPrimary:true,responsive:true});
 }
 
 try{
  for(const width of [1440,390]){
   const context=await browser.newContext({viewport:{width,height:844},hasTouch:width===390,isMobile:width===390}),{page,errors}=await openSignup(context);
-  await expectSignupLayout(page,width);await page.getByLabel('Display name',{exact:true}).fill('Missing signer');
-  await page.getByRole('button',{name:'Continue with Nostr signer',exact:true}).click();
-  await expect(page.getByRole('alert')).toContainText('Install or enable a Nostr signer browser extension');
-  await expect(page.getByRole('alert')).toContainText('create or import your key in the signer');
-  await expect(page.getByRole('alert')).toContainText('Freedom Tools cannot create a key in your signer');
-  await expect(page.locator('#toast')).not.toBeVisible();
-  await page.getByText('Use a temporary identity instead',{exact:true}).click();
-  const warning=page.getByText('Temporary and not recoverable.',{exact:false}),temporary=page.getByRole('button',{name:'Create temporary identity',exact:true});
+  await expectSignupLayout(page,width);await page.getByLabel('Display name',{exact:true}).fill('Local throwaway user');
+  const warning=page.getByText('Local and not recoverable.',{exact:false}),temporary=page.getByRole('button',{name:'Generate local key and continue',exact:true});
   await expect(warning).toBeVisible();await expect(temporary).toBeVisible();
   expect((await warning.boundingBox())!.y).toBeLessThan((await temporary.boundingBox())!.y);
-  expect(await temporary.evaluate(element=>element.classList.contains('primary'))).toBe(false);
+  expect(await temporary.evaluate(element=>element.classList.contains('primary'))).toBe(true);
   await page.screenshot({path:`${evidence}/${width}-signup.png`,fullPage:true});
   await temporary.click();await expect(page.getByRole('heading',{name:'Canvases',exact:true})).toBeVisible();
   expect((await page.evaluate(async()=>await(await fetch('/api/v1/me')).json())).member.identity_type).toBe('temporary');
   await page.reload();await expect(page.getByRole('heading',{name:'Canvases',exact:true})).toBeVisible();
-  expect(errors).toEqual([]);checks.push({width,missingSignerGuidance:true,temporaryWarningBeforeUse:true,temporarySessionRestore:true});await context.close();
+  expect(errors).toEqual([]);checks.push({width,throwawayWarningBeforeUse:true,temporarySessionRestore:true});await context.close();
  }
 
  const signerSecret=generateSecretKey(),signatures:any[]=[],externalContext=await browser.newContext({viewport:{width:1440,height:900}});
@@ -54,7 +49,8 @@ try{
  await external.exposeFunction('testSign',(event:any)=>{const signed=finalizeEvent(event,signerSecret);signatures.push(signed);return signed;});
  await external.addInitScript(()=>{(window as any).nostr={signEvent:(event:any)=>(window as any).testSign(event)};});
  await external.goto(server.url.href);await external.getByRole('button',{name:'Create a New Profile',exact:true}).click();await external.getByLabel('Display name',{exact:true}).fill('External signer user');
- await external.getByRole('button',{name:'Continue with Nostr signer',exact:true}).click();await expect(external.getByRole('heading',{name:'Canvases',exact:true})).toBeVisible();
+ await external.getByText('Use a browser extension signer instead',{exact:true}).click();
+ await external.getByRole('button',{name:'Continue with browser signer',exact:true}).click();await expect(external.getByRole('heading',{name:'Canvases',exact:true})).toBeVisible();
  let member=(await external.evaluate(async()=>await(await fetch('/api/v1/me')).json())).member;expect(member.identity_type).toBe('extension');expect(member.pubkey).toBe(getPublicKey(signerSecret));expect(signatures).toHaveLength(1);
  const externalSecretHex=Buffer.from(signerSecret).toString('hex');
  const delivery=await external.evaluate(()=>({body:document.body.innerText,local:Object.values(localStorage),session:Object.values(sessionStorage)}));

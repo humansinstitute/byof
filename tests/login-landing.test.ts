@@ -47,17 +47,19 @@ test('both entry choices capture and preserve a code before authentication', () 
   expect(source).toContain("After authentication, join with code");
   expect(source).toContain("joinCodeError=error.message;screen='join-code'");
 });
-test('new-profile signup leads with external signer custody and demotes the temporary fallback', () => {
+test('new-profile signup leads with a locally saved throwaway key and keeps browser signing secondary', () => {
   const login = source.match(/if \(screen === 'login'\)[^\n]+/)![0];
   expect(login.indexOf('signup-primary')).toBeLessThan(login.indexOf('signup-fallback'));
-  expect(login.indexOf("button('extension'" )).toBeLessThan(login.indexOf("button('temporary'"));
-  expect(login).toContain('Continue with Nostr signer');
+  expect(login.indexOf("button('temporary'" )).toBeLessThan(login.indexOf("button('extension'"));
+  expect(login).toContain('Generate a throwaway key');
+  expect(login).toContain('Generate local key and continue');
+  expect(login).toContain('save it only in this browser session');
+  expect(login).toContain('Local and not recoverable.');
+  expect(login).toContain('Closing this browser tab or signing out removes the key permanently');
+  expect(login).toContain('Use a browser extension signer instead');
   expect(login).toContain('Freedom Tools never receives your private key.');
-  expect(login).toContain('create a new key or import your existing key in the signer');
-  expect(login).toContain('Freedom Tools cannot command a signer to generate a key.');
+  expect(login).toContain('create or import your key there');
   expect(login).toContain('<details class="signup-fallback">');
-  expect(login).toContain('Temporary and not recoverable.');
-  expect(login).toContain('closing the tab or signing out removes it permanently');
   expect(login).not.toContain('nsec');
 });
 test('missing-signer guidance is actionable without pretending Freedom Tools can create a key', () => {
