@@ -4,7 +4,7 @@ if (!appSyntax.success) throw new Error(appSyntax.logs.join("\n"));
 const result = await Bun.build({ entrypoints: ["src/client-identity.ts"], outdir: "public", naming: "identity.js", target: "browser", minify: true });
 if (!result.success) throw new Error(result.logs.join("\n"));
 mkdirSync("tmp/build", { recursive: true });
-const assets = await Promise.all(["index.html", "app.js", "activity-time.js", "chat-attachments.js", "invitation-url.js", "napplet-host.js", "napplet-cache.js", "canvas-host.js", "style.css", "identity.js"].map(async name => ({ name, sha256: new Bun.CryptoHasher("sha256").update(await Bun.file(`public/${name}`).arrayBuffer()).digest("hex") })));
+const assets = await Promise.all(["index.html", "app.js", "activity-time.js", "chat-attachments.js", "invitation-url.js", "napplet-host.js", "napplet-cache.js", "canvas-host.js", "napplet.d.ts", "style.css", "identity.js"].map(async name => ({ name, sha256: new Bun.CryptoHasher("sha256").update(await Bun.file(`public/${name}`).arrayBuffer()).digest("hex") })));
 const sourceCommit = process.env.FREEDOM_SOURCE_SHA || Bun.spawnSync(["git", "rev-parse", "HEAD"]).stdout.toString().trim();
 const worktreeDirty = process.env.FREEDOM_SOURCE_SHA ? false : Bun.spawnSync(["git", "status", "--porcelain"]).stdout.toString().trim().length > 0;
 writeFileSync("tmp/build/assets.json", JSON.stringify({ version: "0.1.0", sourceCommit, worktreeDirty, assets }, null, 2));

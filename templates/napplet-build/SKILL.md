@@ -30,14 +30,25 @@ unrelated private projects. Page JavaScript may call external HTTPS services wit
 `fetch` and open secure `wss:` WebSockets. Those endpoints must support browser
 CORS from the Napplet's opaque/null origin, and normal mixed-content rules apply.
 Show honest loading, offline, error and partial states. Never put API keys, service
-credentials or host secrets in source; Freedom Tools does not add credentials or
-provide a generic proxy. Keep active assets inline: no external scripts, imports,
+credentials or host secrets in source; Freedom Tools provides no generic proxy or
+arbitrary credential attachment. Keep active assets inline: no external scripts, imports,
 stylesheets, frames, plugins/objects or form destinations. It receives the
 host-mediated `window.napplet` version 1 API: capability
 discovery, consented public identity, participant event signing and durable user
 storage and approved public read-only relay queries/live subscriptions. Use the exact methods and limits in the current saved guidance. This is
 a Freedom Tools subset, not full NAP conformance. No host administration, relay publishing/AUTH, external publication, private keys or LLM backend APIs are available. Callbacks belong in napplet.relay.subscribe(options,{onEvent,onStatus}); close its returned handle on teardown. Query returns events plus honest per-relay completeness/partial/truncated states. Failures are not empty feeds. Render relay data as text, never HTML; do not load URLs from tags or content. Builder-side public retrieval
 is distinct from page runtime permissions.
+
+The one server-mediated external service is the fixed managed Cashu/Ippon
+domain: `napplet.cashu.status()`, `connect()`, `createDeposit(amount)`,
+`checkDeposit(quote)` and `disconnect()`. The host chooses the Ippon endpoint,
+retains its access key and scopes wallet/quote records to the authenticated
+Canvas, project and user. App code cannot supply an upstream URL, path, method,
+header, key or identity. Results contain only safe wallet/balance and deposit
+invoice/status data. Creating an invoice is pending, `PAID` still awaits
+minting, and only `ISSUED` means ecash was issued. Do not read or migrate an old
+browser-stored Ippon key. Disconnect forgets local managed authority; Ippon has
+no upstream wallet-delete operation. No other generic proxy exists.
 
 Use `tmp/notes.md`, `tmp/datamodel.md` and other `tmp/` files for persistent notes,
 exploratory designs, research and disposable experiments. Preserve their contents

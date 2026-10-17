@@ -1,7 +1,7 @@
 // Trusted parent only. No host cookie, CSRF, lease token or signer enters the iframe.
 import { canvasDomain, datasetDisplayName } from '/canvas-host.js';
 import { participantSigner, verifyEvent, getEventHash } from '/identity.js';
-const VERSION=1, MAX_BYTES=49152, METHODS=['capabilities','identity.getPublicKey','signing.signEvent','storage.get','storage.set','storage.remove','relay.query','relay.subscribe','relay.close'];
+const VERSION=1, MAX_BYTES=49152, METHODS=['capabilities','identity.getPublicKey','signing.signEvent','storage.get','storage.set','storage.remove','relay.query','relay.subscribe','relay.close','cashu.status','cashu.connect','cashu.createDeposit','cashu.checkDeposit','cashu.disconnect'];
 const SIGN_KINDS=[1,30023,30024,30078];
 export function installNappletHost(context) {
   const error=(code,message)=>Object.assign(new Error(message),{code});
@@ -81,7 +81,12 @@ export function installNappletHost(context) {
     return JSON.parse(JSON.stringify(input));
   }
   async function execute(b,method,p,signal) {
-    if(method==='capabilities'){if(Object.keys(p).length)throw error('INVALID','Capabilities takes no parameters');return {version:VERSION,methods:allMethods,datasets:{explicitConsent:true,sharedRequiresCanvasAccess:true,valueBytes:32768,keys:128,quotaBytes:4194304,versionChecked:true},signing:{available:!!participantSigner(context().member.identity_type),kinds:SIGN_KINDS},storage:{durable:true,keyBytes:128,valueBytes:32768,quotaBytes:262144,keys:128},limits:{requestBytes:MAX_BYTES,concurrency:4,timeoutMs:60000},relay:{readOnly:true,relays:APPROVED_RELAYS,limits:RELAY_LIMITS},publication:false};}
+    if(method==='capabilities'){if(Object.keys(p).length)throw error('INVALID','Capabilities takes no parameters');return {version:VERSION,methods:allMethods,cashu:{managed:true,provider:'Minibits Ippon',scope:'canvas-project-user',methods:['status','connect','createDeposit','checkDeposit','disconnect'],amount:{integer:true,min:1,max:100000}},datasets:{explicitConsent:true,sharedRequiresCanvasAccess:true,valueBytes:32768,keys:128,quotaBytes:4194304,versionChecked:true},signing:{available:!!participantSigner(context().member.identity_type),kinds:SIGN_KINDS},storage:{durable:true,keyBytes:128,valueBytes:32768,quotaBytes:262144,keys:128},limits:{requestBytes:MAX_BYTES,concurrency:4,timeoutMs:60000},relay:{readOnly:true,relays:APPROVED_RELAYS,limits:RELAY_LIMITS},publication:false};}
+    if(method.startsWith('cashu.')){
+      const action=method.slice(6),allowed=action==='createDeposit'?['amount']:action==='checkDeposit'?['quote']:[];
+      if(Object.keys(p).some(k=>!allowed.includes(k))||Object.keys(p).length!==allowed.length)throw error('INVALID','Invalid managed Cashu parameters');
+      return backend(b,'cashu',{token:b.token,method:action,...p},signal);
+    }
     if(method.startsWith('datasets.'))return canvas.execute(b,method,p,signal);
     if(method.startsWith('relay.')) {
       if(method==='relay.close') {if(Object.keys(p).length!==1||typeof p.subscriptionId!=='string'||!/^ft\d{1,8}$/.test(p.subscriptionId))throw error('INVALID','Subscription ID required');b.relays.get(p.subscriptionId)?.close();b.relays.delete(p.subscriptionId);for(const [id,a] of b.unacked)if(a.subscriptionId===p.subscriptionId)b.unacked.delete(id);return;}

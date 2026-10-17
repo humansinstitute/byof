@@ -3,7 +3,7 @@
 Authenticated previews receive `window.napplet` before app scripts run. All
 methods return promises. Check capabilities and handle rejection; opening the
 HTML outside Freedom Tools does not provide this API. This bridge adds public
-participant identity, participant signing, durable app data and approved public relay reads to existing
+participant identity, participant signing, durable app data, approved public relay reads and a narrow managed Cashu/Ippon wallet to existing
 preview/sharing behavior.
 
 ```js
@@ -36,6 +36,55 @@ a fake bridge, add a signer/key, or fetch host endpoints from the iframe.
 | `relay.query(options)` | validated filters, optional relays/timeoutMs | bounded events, per-relay state, complete/partial/truncated |
 | `relay.subscribe(options,{onEvent,onStatus})` | options plus local callbacks | `{id, close()}` handle; stored history followed by live events |
 | `storage.remove(key)` | ASCII key | resolves without a value; absent keys are harmless |
+| `cashu.status()` | none | disconnected state, or safe wallet details and the latest managed deposit |
+| `cashu.connect()` | none | idempotently returns the existing managed wallet or explicitly creates one |
+| `cashu.createDeposit(amount)` | integer 1–100000 in the wallet unit | bounded Lightning invoice/quote/state/expiry |
+| `cashu.checkDeposit(quote)` | a quote previously created in this exact scope | refreshed invoice/quote/state/expiry |
+| `cashu.disconnect()` | none | forgets local managed credential and quote records; reports that upstream deletion is unavailable |
+
+The public declaration is served as [`/napplet.d.ts`](../public/napplet.d.ts).
+
+## Managed Cashu/Ippon domain
+
+This is a purpose-built server capability, not a general HTTP proxy. The server
+pins Ippon to `https://ippon.minibits.cash` by default. Deployment may set
+`FREEDOM_IPPON_BASE_URL` only to an HTTPS origin with no credentials, path,
+query or fragment. Child code cannot select an upstream URL, route, method,
+header or bearer credential.
+
+Wallet credentials and known quote IDs are durable SQLite records under the
+host-derived **Canvas/workshop + Napplet project + authenticated participant**
+scope. The schema uses one wallet row per exact scope and a foreign-keyed quote
+table. An in-process single flight and durable `creating`/`uncertain` state
+prevent normal retries and restarts from silently creating wallets repeatedly.
+Because Ippon's create route has no idempotency key, a network failure after
+upstream creation is intrinsically ambiguous: Freedom Tools retains an
+`uncertain` marker and requires the user to explicitly forget it before trying
+again. Ippon has no delete-wallet endpoint, so forgetting removes local
+authority and quote metadata but may leave an empty alpha wallet upstream.
+
+`status` and `connect` return `name`, `mint`, `unit`, confirmed/pending balances
+and safe limits. Deposits return only `quote`, BOLT11 `invoice`, `state` and
+nullable `expiry`. Ippon's `access_key` is deliberately removed even though its
+wallet response echoes it. Response parsing allowlists these fields; extra JSON
+cannot cross the bridge. Existing `napplet.storage` and existing projects are
+untouched. In particular, an access key previously stored by an older Cashu
+starter is not read or migrated automatically.
+
+The host accepts deposit amounts only as whole values from 1 through 100000 and
+uses the connected wallet's server-recorded unit. It accepts only bounded quote
+identifiers already recorded for that exact scope before calling the fixed
+`GET /v1/wallet/deposit/:quote` route. This local binding also compensates for
+Ippon's current deposit-status route not independently associating a quote with
+the authenticated wallet. Upstream calls have a ten-second deadline, no
+redirects and a 64 KiB response limit. Non-2xx, timeout, malformed/oversized JSON
+and schema failures become useful generic errors without reflecting response
+bodies, URLs or credentials into the app or logs.
+
+Ippon states are presented literally: creating an invoice is still `UNPAID`;
+`PAID` means payment was seen but issuance may still be pending; only `ISSUED`
+means the wallet received ecash. The upstream is alpha software and should hold
+only small experimental balances.
 
 Identity consent lasts only for this running frame/account/workshop/revision.
 Every signing request shows the app title, workshop/project/revision, public
@@ -102,7 +151,8 @@ permits browser-native HTTPS fetch and secure WSS connections with `connect-src
 https: wss:`. Because the frame has an opaque origin, service endpoints see an
 `Origin: null` request where Origin applies and must opt into appropriate browser
 CORS; normal mixed-content behavior is not bypassed. Freedom Tools does not add
-cookies, credentials, secrets or a proxy. External scripts/imports/stylesheets,
+cookies, credentials or a generic proxy to direct calls; the fixed managed
+Cashu/Ippon domain above is the sole narrow exception. External scripts/imports/stylesheets,
 frames, objects/plugins and form destinations remain blocked. The bridge does not
 expose private keys, host administration, relay publishing/AUTH, LLM APIs or
 external manifest/app publication. Public read-only relay access stays in the

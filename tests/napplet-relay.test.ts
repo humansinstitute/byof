@@ -1,7 +1,7 @@
 import {test,expect} from 'bun:test';
 import {finalizeEvent,verifyEvent} from 'nostr-tools';
 import {Database} from 'bun:sqlite';
-import {migrateNappletPrompt,obsoleteNoRelayParagraph,obsoleteNetworkCapabilityParagraph,nappletCapabilityParagraph,builderPromptMaxChars} from '../src/builder-prompt.ts';
+import {migrateNappletPrompt,obsoleteNoRelayParagraph,obsoleteNetworkCapabilityParagraph,obsoleteIpponlessCapabilityParagraph,nappletCapabilityParagraph,builderPromptMaxChars} from '../src/builder-prompt.ts';
 const source=await Bun.file('public/napplet-host.js').text();
 const relay:any=new Function(source.slice(source.indexOf('// Fixed public registry')).replaceAll('export ','')+';return {APPROVED_RELAYS,validateRelayOptions,validRelayEvent,relayEventMatches,createRelayPool};')();
 const key=new Uint8Array(32).fill(1);
@@ -35,10 +35,14 @@ test('editable exact no-relay migration preserves max-sized custom instructions 
  const db=new Database(':memory:');db.exec('CREATE TABLE builder_prompt(id INTEGER,revision INTEGER,text TEXT,updated_at INTEGER);CREATE TABLE request_builder_prompts(text TEXT)');
  const text='custom'.padEnd(builderPromptMaxChars-obsoleteNoRelayParagraph.length,'x')+obsoleteNoRelayParagraph;db.run('INSERT INTO builder_prompt VALUES(1,2,?,0)',[text]);db.run('INSERT INTO request_builder_prompts VALUES(?)',[text]);migrateNappletPrompt(db,'builder_prompt');const row:any=db.query('SELECT * FROM builder_prompt').get();expect(row.text).toBe(text.replace(obsoleteNoRelayParagraph,nappletCapabilityParagraph));expect(row.text.length).toBeLessThanOrEqual(builderPromptMaxChars);expect(row.revision).toBe(3);expect((db.query('SELECT text FROM request_builder_prompts').get() as any).text).toBe(text);migrateNappletPrompt(db,'builder_prompt');expect((db.query('SELECT revision FROM builder_prompt').get() as any).revision).toBe(3);db.close();
 });
-test('editable current prompt gains direct HTTPS/WSS guidance without changing queued snapshots',()=>{
+test('editable current prompt gains managed Cashu and direct network guidance without changing queued snapshots',()=>{
  const db=new Database(':memory:');db.exec('CREATE TABLE builder_prompt(id INTEGER,revision INTEGER,text TEXT,updated_at INTEGER);CREATE TABLE request_builder_prompts(text TEXT)');
  db.run('INSERT INTO builder_prompt VALUES(1,4,?,0)',[obsoleteNetworkCapabilityParagraph]);db.run('INSERT INTO request_builder_prompts VALUES(?)',[obsoleteNetworkCapabilityParagraph]);migrateNappletPrompt(db,'builder_prompt');
- const row:any=db.query('SELECT * FROM builder_prompt').get();expect(row.text).toBe(nappletCapabilityParagraph);expect(row.revision).toBe(5);expect(row.text).toContain('Direct HTTPS/WSS allowed');expect(row.text).toContain('opaque/null origin');expect((db.query('SELECT text FROM request_builder_prompts').get() as any).text).toBe(obsoleteNetworkCapabilityParagraph);db.close();
+ const row:any=db.query('SELECT * FROM builder_prompt').get();expect(row.text).toBe(nappletCapabilityParagraph);expect(row.revision).toBe(5);expect(row.text).toContain('Cashu/Ippon');expect(row.text).toContain('HTTPS/WSS needs CORS');expect((db.query('SELECT text FROM request_builder_prompts').get() as any).text).toBe(obsoleteNetworkCapabilityParagraph);db.close();
+});
+test('editable pre-Cashu prompt gains the managed domain exactly once',()=>{
+ const db=new Database(':memory:');db.exec('CREATE TABLE builder_prompt(id INTEGER,revision INTEGER,text TEXT,updated_at INTEGER);CREATE TABLE request_builder_prompts(text TEXT)');
+ db.run('INSERT INTO builder_prompt VALUES(1,8,?,0)',[obsoleteIpponlessCapabilityParagraph]);migrateNappletPrompt(db,'builder_prompt');expect(db.query('SELECT revision,text FROM builder_prompt').get()).toEqual({revision:9,text:nappletCapabilityParagraph});migrateNappletPrompt(db,'builder_prompt');expect((db.query('SELECT revision FROM builder_prompt').get() as any).revision).toBe(9);db.close();
 });
 test('parent CSP includes every approved relay and preview isolation remains fixed',async()=>{
  const application=await Bun.file('src/application.ts').text();for(const url of relay.APPROVED_RELAYS)expect(application).toContain(url);const assets=await Bun.file('src/assets.ts').text();expect(assets).toContain('connect-src https: wss:');expect(assets).toContain("script-src 'unsafe-inline'");expect(assets).toContain("frame-src 'none'");expect(assets).toContain("form-action 'none'");expect(assets).toContain('sandbox allow-scripts allow-forms');

@@ -18,17 +18,13 @@ test("catalogue contains exactly Pete's five starters and removes legacy entries
   }
 });
 
-test("Cashu uses only project/user-private storage and the documented Ippon REST contract", () => {
+test("Cashu uses only the narrow managed Ippon capability and explains issuance honestly", () => {
   const source = byId("cashu").source;
-  expect(source).toContain('KEY="ippon.wallet.v1"');
-  expect(source).toContain("napplet.storage.get(KEY)");
-  expect(source).toContain("napplet.storage.set(KEY,wallet)");
-  expect(source).toContain("napplet.storage.remove(KEY)");
-  expect(source).toContain('"/v1/wallet/deposit"');
-  expect(source).toContain('"/v1/wallet/deposit/"');
-  expect(source).toContain('data.state==="ISSUED"');
-  expect(source).not.toMatch(/seed|private[_ -]?key|dataset/i);
-  expect(source).toContain("Origin: null");
+  for (const method of ["napplet.cashu.status()", "napplet.cashu.connect()", "napplet.cashu.createDeposit(amount)", "napplet.cashu.checkDeposit(currentDeposit.quote)", "napplet.cashu.disconnect()"]) expect(source).toContain(method);
+  expect(source).toContain('state==="ISSUED"');
+  expect(source).toContain("Creating it did not receive funds");
+  expect(source).toContain("not a shared Canvas dataset");
+  expect(source).not.toMatch(/fetch\(|accessKey|authorization|ippon\.wallet\.v1|napplet\.storage|Ippon server<input/i);
 });
 
 test("Nostr browser uses the trusted relay API, exact filter, bounded rendering and honest states", () => {
@@ -55,17 +51,15 @@ test("spinner always resolves Yes and dice creates exactly 100 unbiased bounded 
   expect(dice).toContain('" · Total: "+rolls.length');
 });
 
-test("Pong requests exactly 21 sats and cannot unlock from invoice creation or manual check", () => {
+test("Pong is immediately playable and contains no payment or unlock behavior", () => {
   const source = byId("pong").source;
-  expect(source).toContain('addressUrl="https://walletofsatoshi.com/.well-known/lnurlp/bitcoinbushbash"');
-  expect(source).toContain("amountMsat=21000");
-  expect(source).toContain('callback.searchParams.set("amount",String(amountMsat))');
-  expect(source).toContain("Creating an invoice is not proof of payment");
-  expect(source).toContain("Pong stays locked");
-  expect(source).toContain('function unlockAfterVerifiedSettlement()');
-  expect(source.match(/unlockAfterVerifiedSettlement\(\)/g)).toHaveLength(1);
+  expect(byId("pong").title).toBe("Pong");
+  expect(source).toContain("<h1>Pong</h1>");
+  expect(source).toContain('const canvas=document.querySelector("#pong")');
+  expect(source).toContain('document.querySelector("#restart").onclick=restart');
   expect(source).toContain('canvas.addEventListener("pointermove"');
   expect(source).toContain('keys.has("ArrowUp")');
+  expect(source).not.toMatch(/lightning|invoice|donat|payment|settlement|unlock|walletofsatoshi|fetch\(/i);
 });
 
 test("catalogue removal does not delete an existing project or revision", () => {

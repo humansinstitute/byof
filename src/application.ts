@@ -10,6 +10,7 @@ import { sha256 } from './assets.ts';
 import { uploadBoardImage, readBoardImage } from './workshop-images.ts';
 import { CanvasRuntime } from './canvas-runtime.ts';
 import { NappletData } from './napplet-data.ts';
+import { IpponCapability } from './ippon.ts';
 import { injectNappletBridge, nappletRuntimeBootstrap, nappletRuntimeShell } from './napplet-runtime.ts';
 import { installProfileStore, saveNostrProfile, knownProfiles } from './profile-store.ts';
 import { TowerConnect } from './tower-connect.ts';
@@ -41,20 +42,21 @@ import {authorizeConfigurableBuilder} from './pipeline/configurable-prepare.ts';
 // Sandboxed frames have an opaque origin. The parent binds capability messages to the exact frame;
 // the existing Escape/focus signals remain separate from the capability channel.
 const previewEscapeBridge = nappletRuntimeBootstrap('00000000-0000-0000-0000-000000000000').suffix;
-export function application(rootConfig: Config, fixtures?: {datasetTransport:(scope:any)=>import('./tower-storage-client.ts').StorageTransport}) {
+export function application(rootConfig: Config, fixtures?: {datasetTransport?:(scope:any)=>import('./tower-storage-client.ts').StorageTransport;ipponFetch?:(input:string|URL|Request,init?:RequestInit)=>Promise<Response>;ipponTimeoutMs?:number}) {
   const config=rootConfig;
   const db = openDatabase(config.dataDir), auth = new Auth(db, config), workshop = new Workshop(db, new Assets(join(config.dataDir, "objects")));
   Workshop.siteAdminProviders.set(db,pubkey=>auth.isHost(pubkey));
   installSite(db,config); installBoard(workshop); installProfileStore(db); const site=new Site(db,config); const towerConnector=new TowerConnect(site,workshop.assets); installDeliveryTables(db); installActivityTables(db); installStorageTables(workshop); workshop.storageRequired=!!config.storage;
   loadBuilderEngine(db,workshop.id,config.followup?.builderRuntime?.agent??"codex");
   const nappletData = new NappletData(db);
+  const ippon = new IpponCapability(db,nappletData,{baseUrl:rootConfig.ipponBaseUrl,fetch:fixtures?.ipponFetch,timeoutMs:fixtures?.ipponTimeoutMs});
   const canvasRuntime=new CanvasRuntime(db,nappletData,fixtures?.datasetTransport);
   Workshop.datasetProviders.set(db,async(w,member)=>{
     const storage=site.storage(w.id);
     const readiness=storage?storageStatus(w,storage):null;
-    if((!storage||readiness?.state!=='ready')&&!fixtures)return {canvasId:w.id,datasets:[],valuesIncluded:false,available:false,reason:'Tower Canvas data is not activated'};
+    if((!storage||readiness?.state!=='ready')&&!fixtures?.datasetTransport)return {canvasId:w.id,datasets:[],valuesIncluded:false,available:false,reason:'Tower Canvas data is not activated'};
     const datasetDiscovery=readiness?.datasetDiscovery;
-    if(!fixtures&&datasetDiscovery?.code!=='exact_match')return {canvasId:w.id,datasets:[],valuesIncluded:false,available:false,reason:datasetDiscovery?.message||'Canvas dataset transport is unavailable'};
+    if(!fixtures?.datasetTransport&&datasetDiscovery?.code!=='exact_match')return {canvasId:w.id,datasets:[],valuesIncluded:false,available:false,reason:datasetDiscovery?.message||'Canvas dataset transport is unavailable'};
     const session=db.query('SELECT hash FROM sessions WHERE pubkey=? AND expires_at>? ORDER BY expires_at DESC LIMIT 1').get(member.pubkey,Math.floor(Date.now()/1000)) as any;
     demand(session,401,'Canvas discovery requires an active owner session');
     try{return await canvasRuntime.discovery(w,w.scoped(member),session.hash,storage);}catch(error){
@@ -152,10 +154,10 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport:(sc
       // Alternate managed port/mesh entry pages move here before authentication.
       if (path === "/api/v1/browser-origin" && method === "GET") return json({ origin });
       if (["/health","/api/health"].includes(path) && method === "GET") {const capable=workshopBuilders(config.followup);const publicationAvailable=!!capable?.agentPublication&&!!(config.storage||config.managedStorage||config.storageTemplates?.length||config.workshopStorage?.length);return json({ status: "ok", service: "liquid-freedom", version: config.version, build: await Bun.file(join(import.meta.dir, "../tmp/build/assets.json")).json().catch(() => null), hostConfigured: !!config.hostPubkey, generation: { available: !!capable?.memberWorkshops && !capable.suspended, operatorApprovedBuildAvailable: !!config.operatorBuild, ownerProjectFollowupAvailable: !!config.followup && !config.followup.suspended, ownerProjectFollowupSuspended: !!config.followup?.suspended, reason: "Installed workshop builders require active admission, project ownership and available allowance" }, publication: { available: publicationAvailable, reason: publicationAvailable?"Agent-tool publication is installed; each Canvas still requires its verified private storage binding.":"Awaiting installed agent-tool publication and managed storage authority" }, limits });}
-      if (["/", "/app.js", "/activity-time.js", "/chat-attachments.js", "/invitation-url.js", "/napplet-host.js", "/napplet-cache.js", "/canvas-host.js", "/identity.js", "/style.css"].includes(path) && method === "GET") {
+      if (["/", "/app.js", "/activity-time.js", "/chat-attachments.js", "/invitation-url.js", "/napplet-host.js", "/napplet-cache.js", "/canvas-host.js", "/identity.js", "/napplet.d.ts", "/style.css"].includes(path) && method === "GET") {
         const file = Bun.file(join(import.meta.dir, "../public", path === "/" ? "index.html" : path.slice(1)));
         demand(await file.exists(), 503, "Managed build required");
-        return new Response(file, { headers: { ...security, "cache-control": "no-store", "content-type": path.endsWith(".js") ? "application/javascript" : path.endsWith(".css") ? "text/css" : "text/html", "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https: wss://relay.primal.net wss://nos.lol wss://relay.damus.io wss://purplepag.es; frame-src 'self'; img-src 'self' https: data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'" } });
+        return new Response(file, { headers: { ...security, "cache-control": "no-store", "content-type": path.endsWith(".js") ? "application/javascript" : path.endsWith(".css") ? "text/css" : path.endsWith(".d.ts") ? "text/plain; charset=utf-8" : "text/html", "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https: wss://relay.primal.net wss://nos.lol wss://relay.damus.io wss://purplepag.es; frame-src 'self'; img-src 'self' https: data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'" } });
       }
       let body: any = {};
       if (mutation) { const bodyLimit=/^\/api\/v1\/projects\/[^/]+\/attachments$/.test(path)?limits.attachmentBodyBytes:limits.bodyBytes;demand(Number(request.headers.get("content-length") || 0) <= bodyLimit, 413, "Request too large"); const raw = await request.text(); demand(Buffer.byteLength(raw) <= bodyLimit, 413, "Request too large"); try { body = raw ? JSON.parse(raw) : {}; } catch { throw new HttpError(400, "Invalid JSON"); } demand(body && typeof body === "object" && !Array.isArray(body), 400, "Expected an object"); }
@@ -200,6 +202,7 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport:(sc
       if(path==='/api/v1/canvas/datasets'&&method==='GET')return json(await canvasRuntime.discovery(workshop,member,session.sessionHash,config.storage));
       if(path==='/api/v1/napplet/open'&&method==='POST')return json(nappletData.open(workshop,member,session.sessionHash,body));
       if(path==='/api/v1/napplet/data'&&method==='POST')return json(nappletData.operate(workshop,member,session.sessionHash,body));
+      if(path==='/api/v1/napplet/cashu'&&method==='POST')return json(await ippon.operate(workshop,member,session.sessionHash,body));
       if(path==='/api/v1/workshops/join'&&method==='POST'){body.invitation=normalizedInvitation(body.invitation);if(shortInvitation(body.invitation))codeAttempt(db,identity.pubkey);return json({member:workshop.join(member,body)});}
 
       if(path==='/api/v1/host/storage'&&method==='GET'){site.admin(identity);return json({...storageStatus(workshop,config.storage),selectedTowerId:workshop.roomRow().tower_id,activationRequirement:config.storage?null:'Managed app execution is unavailable; configure the installation-wide storage worker'});}
