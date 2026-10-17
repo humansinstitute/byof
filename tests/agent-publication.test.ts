@@ -15,7 +15,7 @@ import {publishNativeNapplet} from '../src/pipeline/agent-publication.ts';
 function fixture(){
  const root=mkdtempSync('/private/tmp/napplet-tool-'),owner='a'.repeat(64),runtimeConfig:any={dataDir:root,origin:'https://app.test',hostPubkey:null,version:'test'},app=application(runtimeConfig);
  app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,'Owner','temporary','admitted',20,1]);
- const member=app.auth.member(owner),project=app.workshop.create(member,'blank').project;
+ const member=app.auth.member(owner),project=app.workshop.create(member,'spinner').project;
  const cfg:any={ownerPubkey:owner,projectId:project.id,conversationKey:project.conversation_id,builderRoot:root+'/napplets',workshopId:project.workshop_id,fileVersions:true,replacementEnabled:true,agentPublication:true};
  const target={towerUrl:'https://tower.test',workspaceId:crypto.randomUUID(),workspaceOwnerNpub:nip19.npubEncode('b'.repeat(64)),appNpub:nip19.npubEncode(owner)};
  const storage:any={installationId:crypto.randomUUID(),appPubkey:owner,appNpub:target.appNpub,towerOrigin:target.towerUrl,workshopId:project.workshop_id,localRoot:cfg.builderRoot,pipeline:{}};

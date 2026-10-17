@@ -16,7 +16,7 @@ async function login(key=generateSecretKey()):Promise<Account>{
   const data=await response.json();return{cookie:response.headers.get('set-cookie')!.split(';')[0]!,csrf:data.csrf,member:data.member};
 }
 async function createCanvas(admin:Account,title:string,owner:string){return(await call('site/workshops',{title,introduction:title+' introduction',owner},admin)).data;}
-async function seedProject(admin:Account,user:Account,canvas:any,starterId='todo'){
+async function seedProject(admin:Account,user:Account,canvas:any,starterId='spinner'){
   await call('host/settings',{title:canvas.title,introduction:canvas.introduction,lightning:'',admission:'open',paused:false},admin,canvas.id);
   await call('workshops/join',{},user,canvas.id);
   const created=(await call('projects',{starterId},user,canvas.id)).data.project;
@@ -43,7 +43,7 @@ test('only the owner or site admin can delete a non-legacy Canvas with exact con
 
 test('Canvas deletion removes the complete local graph and leaves another Canvas untouched',async()=>{
   const admin=await login(hostKey),owner=await login(),user=await login(),canvas=await createCanvas(admin,'Delete me',owner.member.pubkey),other=await createCanvas(admin,'Keep me',owner.member.pubkey);
-  const project=await seedProject(owner,user,canvas),otherProject=await seedProject(owner,user,other,'game'),requestId='request-'+project.id;
+  const project=await seedProject(owner,user,canvas),otherProject=await seedProject(owner,user,other,'dice'),requestId='request-'+project.id;
   app.db.run('INSERT INTO canvas_create_intents VALUES(?,?,?,?)',[admin.member.pubkey,crypto.randomUUID(),'{}',canvas.id]);
   app.db.run('INSERT INTO workshop_board_images VALUES(?,?,?,?,?)',[canvas.id,'a'.repeat(64),'image/png',10,10]);
   app.db.run('INSERT INTO napplet_user_data VALUES(?,?,?,?,?,?)',[canvas.id,project.id,user.member.pubkey,'score','1',1]);

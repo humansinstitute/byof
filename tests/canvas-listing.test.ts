@@ -18,7 +18,7 @@ test('Canvas listings expose truthful counts only to members who can list that C
  const admin=await login(hostKey),member=await login(),outsider=await login();
  const canvas=(await call('site/workshops',admin,{title:'Visual planning',introduction:'Plan together',owner:member.member.pubkey})).data;
  await call('workshops/join',member,{},canvas.id);await call('host/settings',member,{title:'Visual planning',introduction:'Plan together',admission:'open',paused:false,lightning:''},canvas.id);
- const project=(await call('projects',member,{starterId:'todo'},canvas.id)).data.project;
+ const project=(await call('projects',member,{starterId:'spinner'},canvas.id)).data.project;
  const room=(await call('room',member,undefined,canvas.id)).data;
  const listed=(await call('workshops',member)).data.workshops.find((item:any)=>item.id===canvas.id);
  expect(listed.overview).toEqual({nappletCount:1,decorationCount:0});

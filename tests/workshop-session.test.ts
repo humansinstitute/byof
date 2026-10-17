@@ -35,7 +35,7 @@ test('admin board → invite join → first dispatch; existing boards resume; no
       expect(joined.status).toBe(200);expect(joined.data.member.state).toBe('admitted');
     }
     await inviteJoin(existing.id);
-    const oldProject=(await call('projects',{starterId:'todo'},user,existing.id)).data.project;
+    const oldProject=(await call('projects',{starterId:'spinner'},user,existing.id)).data.project;
     const oldConversation=oldProject.conversation_id;
     const oldRequest=crypto.randomUUID();
     expect((await call(`projects/${oldProject.id}/requests`,{requestId:oldRequest,prompt:'Build a counter',mode:'build',expectedRevisionId:oldProject.current_revision},user,existing.id)).data.generationAvailable).toBe(false);
@@ -60,13 +60,13 @@ test('admin board → invite join → first dispatch; existing boards resume; no
     const selected=(await call('site/workshops',{title:'Selected Tower needs authorization',towerId:tower.id},admin)).data;
     const selectedStorage=(await call('host/storage',undefined,admin,selected.id)).data;expect(selectedStorage.state).toBe('needs_authorization');
     const board=(await call('site/workshops',{title:'New board'},admin)).data;
-    expect((await call('projects',{starterId:'todo'},outsider,board.id)).status).toBe(403);
+    expect((await call('projects',{starterId:'spinner'},outsider,board.id)).status).toBe(403);
     expect((await call('workshops/redeem-code',{code:'000000'},outsider)).status).toBe(403);
     await inviteJoin(board.id);
-    const created=await call('projects',{starterId:'todo'},user,board.id);
+    const created=await call('projects',{starterId:'spinner'},user,board.id);
     expect(created.status).toBe(201);expect(created.data.generationAvailable).toBe(true);
     const project=created.data.project;
-    expect((await call('projects',{starterId:'game'},user,board.id)).status).toBe(201);
+    expect((await call('projects',{starterId:'dice'},user,board.id)).status).toBe(201);
     expect((await call(`projects/${project.id}`,undefined,outsider,board.id)).status).toBe(403);
     expect((await call(`projects/${project.id}`,undefined,user,existing.id)).status).toBe(404);
     const body={requestId:crypto.randomUUID(),prompt:'Build a counter',mode:'build',expectedRevisionId:project.current_revision};

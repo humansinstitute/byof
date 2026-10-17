@@ -11,7 +11,7 @@ test("callback bypasses browser origin middleware but verifies signer, correlati
   try {
     const memberKey = getPublicKey(generateSecretKey());
     app.db.run("INSERT INTO members VALUES(?,?,?,?,?,?)",[memberKey,"Member","temporary","admitted",20,1]);
-    const member = app.auth.member(memberKey), project = app.workshop.create(member,"todo").project;
+    const member = app.auth.member(memberKey), project = app.workshop.create(member,"spinner").project;
     const input = {requestId:crypto.randomUUID(),prompt:"private prompt",expectedRevisionId:project.current_revision};
     app.workshop.submitUnavailable(member,project.id,input); bindRun(app.db,input.requestId,"real-run-reference");
     const result = {requestId:input.requestId,projectId:project.id,action:"classifier_error",banRequired:false,retryable:true};
@@ -39,7 +39,7 @@ test("generated callback promotes once and charges once across signed retries", 
   try {
     const owner = getPublicKey(generateSecretKey());
     app.db.run("INSERT INTO members VALUES(?,?,?,?,?,?)",[owner,"Member","temporary","admitted",20,1]);
-    const member = app.auth.member(owner), project = app.workshop.create(member,"todo").project;
+    const member = app.auth.member(owner), project = app.workshop.create(member,"spinner").project;
     const input = {requestId:crypto.randomUUID(),prompt:"game\n",expectedRevisionId:project.current_revision};
     app.workshop.submitUnavailable(member,project.id,input);bindRun(app.db,input.requestId,"build-run");
     const source="<html><body><button>Play generated document</button></body></html>";
@@ -65,8 +65,8 @@ test("startup restores a stale building request from its latest matching uncerta
   try {
     const owner=getPublicKey(generateSecretKey());
     app.db.run("INSERT INTO members VALUES(?,?,?,?,?,?)",[owner,"Member","temporary","admitted",20,1]);
-    const member=app.auth.member(owner),project=app.workshop.create(member,"todo").project;
-    const input={requestId:crypto.randomUUID(),prompt:"game",expectedRevisionId:project.current_revision};
+    const member=app.auth.member(owner),project=app.workshop.create(member,"spinner").project;
+    const input={requestId:crypto.randomUUID(),prompt:"dice",expectedRevisionId:project.current_revision};
     app.workshop.submitUnavailable(member,project.id,input);bindRun(app.db,input.requestId,"uncertain-run");
     app.db.run("INSERT INTO delivery_receipts VALUES(?,?,?,?,?,?,?)",["uncertain-delivery","uncertain-run",input.requestId,"hash","execution_uncertain","{}",1]);
     app.db.run("UPDATE requests SET status='building',error=NULL WHERE id=?",[input.requestId]);
@@ -80,8 +80,8 @@ test("startup does not override a building request when a later matching receipt
   try {
     const owner=getPublicKey(generateSecretKey());
     app.db.run("INSERT INTO members VALUES(?,?,?,?,?,?)",[owner,"Member","temporary","admitted",20,1]);
-    const member=app.auth.member(owner),project=app.workshop.create(member,"todo").project;
-    const input={requestId:crypto.randomUUID(),prompt:"game",expectedRevisionId:project.current_revision};
+    const member=app.auth.member(owner),project=app.workshop.create(member,"spinner").project;
+    const input={requestId:crypto.randomUUID(),prompt:"dice",expectedRevisionId:project.current_revision};
     app.workshop.submitUnavailable(member,project.id,input);bindRun(app.db,input.requestId,"finished-run");
     app.db.run("INSERT INTO delivery_receipts VALUES(?,?,?,?,?,?,?)",["uncertain-delivery","finished-run",input.requestId,"hash-1","execution_uncertain","{}",1]);
     app.db.run("INSERT INTO delivery_receipts VALUES(?,?,?,?,?,?,?)",["later-delivery","finished-run",input.requestId,"hash-2","failed","{}",2]);

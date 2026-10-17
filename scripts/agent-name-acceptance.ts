@@ -38,7 +38,7 @@ try {
  await expect(page.getByLabel('Agent name',{exact:true})).toHaveValue('Ada Lovelace');
  await expect(page.getByLabel('Napplet builder guidance')).toHaveValue(guidance);
  await page.reload();
- await page.getByRole('button',{name:'Small game',exact:true}).click();
+ await page.getByRole('button',{name:'100 D6 rolls',exact:true}).click();
  await expect(page.getByRole('heading',{name:'Talk with Ada Lovelace',exact:true})).toBeVisible();
  await expect(page.locator('.message b').filter({hasText:'Ada Lovelace'}).first()).toBeVisible();
  expect(await page.locator('.conversation-pane').innerText()).not.toMatch(/prompt v\d|legacy guidance|saved Builder prompt/i);
@@ -48,7 +48,7 @@ try {
  expect(requestBuilderPrompt(app.db,latest.id)?.agentName).toBe('Ada Lovelace');
  expect(requestBuilderPrompt(app.db,original.id)?.agentName).toBe('Agent 21');
  app.db.run("UPDATE requests SET status='building' WHERE id=?",[latest.id]);
- await page.reload();await page.getByRole('button',{name:'Small game',exact:true}).click();
+ await page.reload();await page.getByRole('button',{name:'100 D6 rolls',exact:true}).click();
  await expect(page.getByRole('status').filter({hasText:'Ada Lovelace is working'})).toBeVisible();
  for(const width of [1440,390]){
   await page.setViewportSize({width,height:900});

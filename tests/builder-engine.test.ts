@@ -7,7 +7,7 @@ import {builderEpoch} from '../src/builder-lifecycle.ts';
 import {dispatchReplacement} from '../src/pipeline/replacement-dispatch.ts';
 import {prepareConfigurableBuilder} from '../src/pipeline/configurable-prepare.ts';
 import {sha256} from '../src/assets.ts';
-function fixture(initial?:any){const dir=mkdtempSync('/tmp/engine-'),owner='a'.repeat(64),app=application({dataDir:dir,hostPubkey:owner,origin:'https://test',version:'test',...(initial?{followup:initial}:{})});app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,'Admin','extension','admitted',20,1]);const member=app.auth.member(owner),project=app.workshop.create(member,'blank').project;const config:any={projectId:project.id,ownerPubkey:owner,conversationKey:project.conversation_id,directory:'/exact/project',replacementEnabled:true,initialContext:true,selectableBuilder:true};const save=(id:string)=>app.workshop.request(member,project.id,{requestId:id,prompt:id,mode:'answer',expectedRevisionId:project.current_revision},true);const choose=(agent:string)=>app.workshop.builderEngine(member,{agent,expectedRevision:loadBuilderEngine(app.db,app.workshop.id).revision});return {app,member,project,config,save,choose,dir,close(){app.db.close();rmSync(dir,{recursive:true,force:true})}}}
+function fixture(initial?:any){const dir=mkdtempSync('/tmp/engine-'),owner='a'.repeat(64),app=application({dataDir:dir,hostPubkey:owner,origin:'https://test',version:'test',...(initial?{followup:initial}:{})});app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,'Admin','extension','admitted',20,1]);const member=app.auth.member(owner),project=app.workshop.create(member,'spinner').project;const config:any={projectId:project.id,ownerPubkey:owner,conversationKey:project.conversation_id,directory:'/exact/project',replacementEnabled:true,initialContext:true,selectableBuilder:true};const save=(id:string)=>app.workshop.request(member,project.id,{requestId:id,prompt:id,mode:'answer',expectedRevisionId:project.current_revision},true);const choose=(agent:string)=>app.workshop.builderEngine(member,{agent,expectedRevision:loadBuilderEngine(app.db,app.workshop.id).revision});return {app,member,project,config,save,choose,dir,close(){app.db.close();rmSync(dir,{recursive:true,force:true})}}}
 
 test('all engine transitions preserve files/source/history and same-runtime conversation resumes without rotating',async()=>{
  for(const from of builderAgents)for(const to of builderAgents){const f=fixture();try{
@@ -121,7 +121,7 @@ test('signed remote preparation rechecks live project and immutable runtime, rej
  const app=application(config);
  try{
   app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,'Admin','extension','admitted',40,1]);
-  const member=app.auth.member(owner),project=app.workshop.create(member,'blank').project,requestId=crypto.randomUUID();
+  const member=app.auth.member(owner),project=app.workshop.create(member,'spinner').project,requestId=crypto.randomUUID();
   const builderRoot=dir+'/napplets';
   config.followup={projectId:project.id,ownerPubkey:owner,conversationKey:project.conversation_id,directory:builderRoot+'/'+app.workshop.id+'/'+project.id,builderRoot,workshopId:app.workshop.id,fileVersions:true,replacementEnabled:true,selectableBuilder:true,agentPublication:true};
   config.storage={installationId:crypto.randomUUID(),appPubkey:getPublicKey(appKey),appNpub:'npub',towerOrigin:'https://tower.example',workshopId:app.workshop.id,localRoot:'/data/napplets',pipeline:{}};

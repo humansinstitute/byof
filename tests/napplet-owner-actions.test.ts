@@ -26,8 +26,8 @@ afterEach(()=>{app.db.close();rmSync(directory,{recursive:true,force:true});});
 
 test('rename and edit allow the owner and Canvas administrator with bounded, unique names and metadata-only updates',async()=>{
   const admin=await login(adminSecret),owner=await login(),other=await login();
-  const source=(await call('projects',{starterId:'game'},owner)).data;
-  const foreign=(await call('projects',{starterId:'todo'},other)).data;
+  const source=(await call('projects',{starterId:'dice'},owner)).data;
+  const foreign=(await call('projects',{starterId:'spinner'},other)).data;
   const path=`projects/${source.project.id}/rename`,before=await call(`projects/${source.project.id}`,undefined,owner);
   expect((await call(path,{title:'Not yours'},other)).status).toBe(404);
   expect((await call(path,{title:'Admin managed name'},admin)).status).toBe(200);
@@ -44,7 +44,7 @@ test('rename and edit allow the owner and Canvas administrator with bounded, uni
 
 test('fork pins the latest saved revision, is idempotent, isolated and excludes private runtime and draft state',async()=>{
   const owner=await login(),forker=await login();
-  const source=(await call('projects',{starterId:'game'},owner)).data.project;
+  const source=(await call('projects',{starterId:'dice'},owner)).data.project;
   const firstRevision=source.current_revision,newHash=app.workshop.assets.put('<!doctype html><html><body>Latest saved</body></html>');
   const latest=app.workshop.addRevision(source,newHash,owner.member.pubkey);
   const requestId='private-source-request';app.workshop.request(app.auth.member(owner.member.pubkey),source.id,{requestId,prompt:'Unpublished private draft',expectedRevisionId:latest},false);
@@ -58,7 +58,7 @@ test('fork pins the latest saved revision, is idempotent, isolated and excludes 
   expect([one.status,two.status].sort()).toEqual([200,201]);
   expect(one.data.project.id).toBe(two.data.project.id);
   const fork=one.data,revision=fork.revisions[0];
-  expect(fork.project).toMatchObject({owner:forker.member.pubkey,origin_project:source.id,origin_revision:latest,title:'Small game — fork'});
+  expect(fork.project).toMatchObject({owner:forker.member.pubkey,origin_project:source.id,origin_revision:latest,title:'100 D6 rolls — fork'});
   expect(fork.project.id).not.toBe(source.id);expect(fork.project.conversation_id).not.toBe(source.conversation_id);
   expect(revision.source_hash).toBe(newHash);expect(revision.id).not.toBe(latest);expect(revision.source_hash).not.toBe((app.db.query('SELECT source_hash FROM revisions WHERE id=?').get(firstRevision) as any).source_hash);
   expect(fork.requests).toEqual([]);expect(fork.consent).toEqual([]);expect(fork.artifacts).toEqual([]);expect(fork.project.appVersionUrl).toBeNull();
@@ -67,13 +67,13 @@ test('fork pins the latest saved revision, is idempotent, isolated and excludes 
   expect({project:app.db.query('SELECT * FROM projects WHERE id=?').get(source.id),revisions:app.db.query('SELECT * FROM revisions WHERE project_id=? ORDER BY number').all(source.id),requests:app.db.query('SELECT * FROM requests WHERE project_id=?').all(source.id)}).toEqual(sourceBefore);
   const editable=await call(`projects/${fork.project.id}/edit`,undefined,forker);expect(editable.status).toBe(200);
   expect((await call(`projects/${fork.project.id}/rename`,{title:'Independent copy'},forker)).status).toBe(200);
-  expect((await call(`projects/${source.id}`,undefined,owner)).data.project.title).toBe('Small game');
+  expect((await call(`projects/${source.id}`,undefined,owner)).data.project.title).toBe('100 D6 rolls');
 });
 
 test('fork rejects missing or hidden sources without residue and a retry can recover cleanly',async()=>{
   const admin=await login(adminSecret),owner=await login(),forker=await login(),missing=crypto.randomUUID();
   expect((await call('projects',{forkProjectId:missing,idempotencyKey:'missing'},forker)).status).toBe(404);
-  const source=(await call('projects',{starterId:'todo'},owner)).data.project;
+  const source=(await call('projects',{starterId:'spinner'},owner)).data.project;
   await call(`host/projects/${source.id}`,{hidden:true},admin);
   expect((await call('projects',{forkProjectId:source.id,idempotencyKey:'retryable'},forker)).status).toBe(404);
   expect((app.db.query('SELECT count(*) n FROM project_forks WHERE actor=?').get(forker.member.pubkey) as any).n).toBe(0);

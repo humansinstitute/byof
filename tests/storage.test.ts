@@ -51,7 +51,7 @@ test('Tower adapter verifies actual bytes, immutable completed retries and owner
 test('storage failure stays pending, verified signed recovery registers exactly one remote version without another native turn',async()=>{
  const dir=mkdtempSync('/private/tmp/byo-storage-'),owner='a'.repeat(64),app=application({dataDir:dir,hostPubkey:null,origin:null,version:'test'});
  try{
-  app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,'Owner','temporary','admitted',20,1]);const member=app.auth.member(owner),p=app.workshop.create(member,'blank').project;
+  app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,'Owner','temporary','admitted',20,1]);const member=app.auth.member(owner),p=app.workshop.create(member,'spinner').project;
   const cfg:any={ownerPubkey:owner,projectId:p.id,conversationKey:p.conversation_id,builderRoot:dir+'/napplets',workshopId:p.workshop_id,fileVersions:true,replacementEnabled:true};
   const storage:StorageConfig={installationId:scope.installationId,appPubkey:owner,appNpub:npub,towerOrigin:target.towerUrl,workshopId:p.workshop_id,localRoot:cfg.builderRoot,pipeline:{} as any};
   app.db.run('INSERT INTO storage_binding(id,installation_id,workshop_id,target_json,local_root,status,probe_job_id,connected_actor) VALUES(1,?,?,?,?,?,?,?)',[storage.installationId,p.workshop_id,JSON.stringify(target),cfg.builderRoot,'ready',null,owner]);app.workshop.storageRequired=true;

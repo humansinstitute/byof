@@ -13,12 +13,12 @@ test('successive trusted projects bootstrap generation0 independently; immutable
  const app=application({dataDir:dir,hostPubkey:null,origin:null,version:'test'});
  try {
   app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,'Pete','temporary','admitted',20,1]);
-  const member=app.auth.member(owner),original=app.workshop.create(member,'game').project;
+  const member=app.auth.member(owner),original=app.workshop.create(member,'dice').project;
   const config={ownerPubkey:owner,projectId:original.id,conversationKey:original.conversation_id,directory:dir+'/original',builderRoot:dir+'/builders',replacementEnabled:true} as FollowupConfig;
   expect(projectRoute(original,config)).toBe(config);
   const scope={ownerPubkey:owner,builderRoot:config.builderRoot!,legacy:{ownerPubkey:owner,projectId:original.id,conversationKey:original.conversation_id,directory:config.directory!}};
-  expect(()=>app.workshop.create(member,'blank')).toThrow('existing');
-  const projects=[app.workshop.create(member,'blank',undefined,trustedCreation(owner,config)).project,app.workshop.create(member,'game',undefined,trustedCreation(owner,config)).project];
+  expect(()=>app.workshop.create(member,'spinner')).toThrow('existing');
+  const projects=[app.workshop.create(member,'spinner',undefined,trustedCreation(owner,config)).project,app.workshop.create(member,'dice',undefined,trustedCreation(owner,config)).project];
   const inputs:any[]=[];
   for(const p of projects){
    const id=crypto.randomUUID();app.workshop.request(member,p.id,{requestId:id,prompt:'Build a game\n',expectedRevisionId:p.current_revision,mode:'build'},true);

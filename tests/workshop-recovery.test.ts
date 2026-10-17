@@ -9,7 +9,7 @@ import {storeDelivery} from '../src/delivery-store.ts';
 function fixture(){
   const dir=mkdtempSync('/tmp/recovery-'),app=application({dataDir:dir,hostPubkey:null,origin:'https://test',version:'test'});
   for(const owner of ['a','b'])app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,owner,'temporary','admitted',20,1]);
-  const member=app.auth.member('a'),project=app.workshop.create(member,'game').project;
+  const member=app.auth.member('a'),project=app.workshop.create(member,'dice').project;
   app.workshop.request(member,project.id,{requestId:'q',prompt:'Latest exact\n',mode:'answer',expectedRevisionId:project.current_revision},true);
   const config:any={projectId:project.id,ownerPubkey:'a',conversationKey:project.conversation_id,directory:'/exact/project',replacementEnabled:true,initialContext:true};
   let input:any,run='initial',sends=0,error='Completed-turn session has unrelated queued prompts',status='preparing';

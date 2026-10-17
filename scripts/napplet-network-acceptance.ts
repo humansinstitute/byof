@@ -60,7 +60,7 @@ const fixture=validateGeneratedHtml(`<!doctype html><html><head><meta charset="u
 
 try{
  const context=await browser.newContext({viewport:{width:1280,height:900},ignoreHTTPSErrors:true}),page=await context.newPage();
- await login(page);const me=await page.evaluate(async()=>await(await fetch('/api/v1/me')).json()),member=app.workshop.scoped(me.member),created=app.workshop.create(member,'blank',undefined,true);
+ await login(page);const me=await page.evaluate(async()=>await(await fetch('/api/v1/me')).json()),member=app.workshop.scoped(me.member),created=app.workshop.create(member,'spinner',undefined,true);
  const revision=app.workshop.addRevision(created.project,app.workshop.assets.put(fixture),member.pubkey);app.workshop.share(member,created.project.id,{revisionId:revision});app.db.run("UPDATE room SET admission='open' WHERE id=1");
  await page.reload();await openCanvas(page);const runtimeElement=page.locator(`iframe[data-project="${created.project.id}"]`).first();await expect(runtimeElement).toHaveAttribute('data-runtime-ready','true');expect(await runtimeElement.getAttribute('data-cache-hit')).toBe('false');
  let runtimeFrame=await runtimeElement.elementHandle().then(handle=>handle!.contentFrame()) as Frame,runtimeResults=await results(runtimeFrame);

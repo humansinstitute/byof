@@ -14,7 +14,7 @@ try{
  page.on('pageerror',e=>errors.push(e.message));
  await page.exposeFunction('fixtureSign',(event:any)=>finalizeEvent(event,key));await page.addInitScript(()=>{(window as any).nostr={signEvent:(event:any)=>(window as any).fixtureSign(event)}});
  app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,'Mobile fixture','extension','admitted',20,1]);
- const project=app.workshop.create(app.auth.member(owner),'game').project;
+ const project=app.workshop.create(app.auth.member(owner),'dice').project;
  const token=crypto.randomUUID(),hash=createHash('sha256').update(token).digest('hex');
  app.db.run('INSERT INTO sessions(hash,pubkey,csrf,expires_at,identity_type) VALUES(?,?,?,?,?)',[hash,owner,'csrf',Math.floor(Date.now()/1000)+3600,'extension']);
  await page.context().addCookies([{name:'lf_session',value:token,url:config.origin,httpOnly:true,sameSite:'Strict'}]);
@@ -24,8 +24,8 @@ try{
  const frame=page.locator('#builder-preview iframe');await expect(frame).toBeVisible();
  await page.evaluate(()=>{(window as any).originalFrame=document.querySelector('#builder-preview iframe');(window as any).originalWindow=(window as any).originalFrame.contentWindow;});
  const appFrame=page.frameLocator('#builder-preview iframe');
- await appFrame.locator('#catch').evaluate(button=>(button as HTMLButtonElement).click());
- await expect(appFrame.locator('#score')).toHaveText('1');
+ await appFrame.locator('#go').evaluate(button=>(button as HTMLButtonElement).click());
+ await expect(appFrame.locator('#rolls span')).toHaveCount(100);
  const requests:string[]=[];page.on('request',r=>{if(/\/preview(?:\?|$)/.test(r.url()))requests.push(r.url());});
  await chat.click();await page.getByLabel('Your next question or change').fill('A draft that must survive');
  const history=page.locator('.conversation-history');await history.evaluate(el=>{el.insertAdjacentHTML('beforeend','<p id="history-marker">Saved history marker</p>');});
@@ -33,7 +33,7 @@ try{
  await history.evaluate(el=>{el.insertAdjacentHTML('beforeend','<div style="height:1800px">Long history</div>');el.scrollTop=200;});
  const scrollTop=await history.evaluate(el=>el.scrollTop);await preview.click();await chat.click();expect(await history.evaluate(el=>el.scrollTop)).toBe(scrollTop);
  await history.evaluate(el=>el.scrollTop=0);
- await expect(appFrame.locator('#score')).toHaveText('1');
+ await expect(appFrame.locator('#rolls span')).toHaveCount(100);
  expect(await page.evaluate(()=>document.querySelector('#builder-preview iframe')===(window as any).originalFrame&&(window as any).originalFrame.contentWindow===(window as any).originalWindow)).toBe(true);expect(requests).toEqual([]);
  await chat.focus();await page.keyboard.press('ArrowLeft');await expect(preview).toBeFocused();await expect(preview).toHaveAttribute('aria-selected','true');
  const options=page.locator('#builder-options>summary');await options.focus();await page.keyboard.press('Enter');
@@ -53,7 +53,7 @@ try{
  expect(await page.evaluate(()=>document.querySelector('#builder-preview iframe')===(window as any).originalFrame&&(window as any).originalFrame.contentWindow===(window as any).originalWindow)).toBe(true);
  await page.screenshot({path:evidence+'/desktop.png'});
  const other=getPublicKey(generateSecretKey());app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[other,'Other participant','extension','admitted',20,1]);
- const inspected=app.workshop.create(app.auth.member(other),'game').project;
+ const inspected=app.workshop.create(app.auth.member(other),'dice').project;
  await page.setViewportSize({width:390,height:844});await page.goto(config.origin+'/?workshop='+app.workshop.id+'&project='+inspected.id);
  await page.locator('#builder-options>summary').click();await expect(page.getByRole('button',{name:'Rename Napplet',exact:true})).toHaveCount(0);
  await expect(page.getByRole('button',{name:'Select version for publication →',exact:true})).toHaveCount(0);

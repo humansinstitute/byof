@@ -14,7 +14,7 @@ export function activityFixture() {
  const directory=mkdtempSync('/tmp/freedom-activity-');
  const app=application({dataDir:directory,origin:'https://test.example',hostPubkey:null,version:'test',callbackSignerPubkey:getPublicKey(signer)});
  const owner=getPublicKey(generateSecretKey());app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,'Owner','temporary','admitted',20,1]);
- const member=app.auth.member(owner),project=app.workshop.create(member,'game').project;
+ const member=app.auth.member(owner),project=app.workshop.create(member,'dice').project;
  const config={activityWebhookUrl:url,definitionId:'definition'} as OperatorBuildConfig;
  function save(id='request',run='run',mode='auto') {
   const projectNow=app.workshop.project(member,project.id);

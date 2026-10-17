@@ -45,7 +45,7 @@ async function pageFor(account:any,project:any){const page:Page=await account.co
 async function open(page:Page,frame:Frame,dataset:any,variable='dataset'){const promise=frame.evaluate(async({dataset,variable})=>{try{(window as any)[variable]=await (window as any).napplet.datasets.open(dataset);return {ok:true};}catch(e:any){return {ok:false,code:e.code,message:e.message};}},{dataset,variable});await expect(page.locator('.napplet-consent')).toBeVisible();await page.locator('[data-napplet-consent="allow"]').click();expect(await promise).toEqual({ok:true});}
 try{
  const a=await account(owner);app.db.run("UPDATE room SET admission='open' WHERE id=1");const b=await account(other);
- const p=app.workshop.create(a.member,'blank').project,q=app.workshop.create(b.member,'blank').project;
+ const p=app.workshop.create(a.member,'spinner').project,q=app.workshop.create(b.member,'spinner').project;
  const one=await pageFor(a,p),two=await pageFor(b,q),binding={name:'inventory',visibility:'shared'},definition={...binding,description:'Stock shared by editor and dashboard',fields:{quantity:'number: current count'}};
  await open(one.page,one.frame,definition);await open(two.page,two.frame,binding);
  expect(await one.frame.evaluate(async()=>await(window as any).dataset.set('stock',{quantity:2},0))).toMatchObject({version:1});

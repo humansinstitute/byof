@@ -22,7 +22,7 @@ test('request attachment snapshot is exact, linked in Markdown and materialized 
   const directory=mkdtempSync('/tmp/freedom-chat-attachment-'),app=application({dataDir:directory,hostPubkey:null,origin:null,version:'test'});
   try{
     const owner='a'.repeat(64);app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,'Owner','temporary','admitted',20,1]);
-    const member=app.auth.member(owner),project=app.workshop.create(member,'blank').project,attachmentId=crypto.randomUUID(),objectId=crypto.randomUUID(),jobId=crypto.randomUUID(),bytes=Buffer.from('image bytes'),requestId=crypto.randomUUID();
+    const member=app.auth.member(owner),project=app.workshop.create(member,'spinner').project,attachmentId=crypto.randomUUID(),objectId=crypto.randomUUID(),jobId=crypto.randomUUID(),bytes=Buffer.from('image bytes'),requestId=crypto.randomUUID();
     app.db.run('INSERT INTO storage_jobs(id,operation,candidate_json,target_json,file_name,sha256,size_bytes,base64,status,object_id,workshop_id,content_type) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',[jobId,'chat_attachment','{}','{}','image.png',sha256(bytes),bytes.length,bytes.toString('base64'),'verified',objectId,app.workshop.id,'image/png']);
     app.db.run('INSERT INTO chat_attachments VALUES(?,?,?,?,?,?,?,?,?,?,?)',[attachmentId,app.workshop.id,project.id,owner,jobId,objectId,'image.png','image/png',bytes.length,sha256(bytes),1]);
     app.db.run('INSERT INTO requests(id,project_id,prompt,expected_revision,status,error,created_at,mode) VALUES(?,?,?,?,?,?,?,?)',[requestId,project.id,`look ![image.png](storage://${objectId})`,project.current_revision,'unavailable',null,1,'auto']);

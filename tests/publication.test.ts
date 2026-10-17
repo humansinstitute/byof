@@ -9,7 +9,7 @@ test("publication selects exact consent only, verifies remote bytes/events, reta
   const app=application({dataDir:dir,origin:'https://test.example',hostPubkey:pubkey,version:'test'});
   try {
     app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[pubkey,'Test host','extension','admitted',20,1]);const host=app.auth.member(pubkey);
-    const project=app.workshop.create(host,'todo').project;const selections=[{projectId:project.id,revisionId:project.current_revision}];
+    const project=app.workshop.create(host,'spinner').project;const selections=[{projectId:project.id,revisionId:project.current_revision}];
     expect(()=>app.publication.prepare(host,selections)).toThrow('consent');
     app.workshop.share(host,project.id,{revisionId:project.current_revision});expect(()=>app.publication.prepare(host,selections)).toThrow('consent');
     app.workshop.consent(host,project.id,{revisionId:project.current_revision,granted:true});const snapshot=app.publication.prepare(host,selections);

@@ -36,7 +36,7 @@ try {
    setTimeout(()=>{try{ws.send(JSON.stringify(['EVENT',m[1],live]));}catch{}},200);
   });
  });
- await login(page,secret);const me=await page.evaluate(async()=>await(await fetch('/api/v1/me')).json());const member=app.workshop.scoped(me.member);const created=app.workshop.create(member,'game',undefined,true);
+ await login(page,secret);const me=await page.evaluate(async()=>await(await fetch('/api/v1/me')).json());const member=app.workshop.scoped(me.member);const created=app.workshop.create(member,'dice',undefined,true);
  const fixture=validateGeneratedHtml('<!doctype html><html><head><title>Relay fixture</title></head><body><h1>Relay fixture</h1><pre id="feed"></pre></body></html>');const revision=app.workshop.addRevision(created.project,app.workshop.assets.put(fixture),member.pubkey);app.workshop.share(member,created.project.id,{revisionId:revision});await page.reload();const frame=await activeFrame(page);
  const options={filters:[{kinds:[1],'#t':['bussobushbash'],limit:1}],relays:['wss://nos.lol'],timeoutMs:2000};
  const result=await invoke(frame,'relay.query',[options]);expect(result.ok).toBe(true);expect(result.value.events.map((e:any)=>e.id)).toEqual([history.id]);expect(result.value.complete).toBe(true);expect(result.value.truncated).toBe(true);

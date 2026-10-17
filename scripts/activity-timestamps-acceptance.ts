@@ -26,7 +26,7 @@ try{
  await page.goto(server.url.href);await page.getByRole('button',{name:'Create a New Profile'}).click();
  await page.getByLabel('Display name').fill('Timestamp fixture host');await page.getByRole('button',{name:'Create profile with browser extension'}).click();
  await expect(page.getByRole('heading',{name:'Canvases',exact:true})).toBeVisible();
- const member=app.auth.member(getPublicKey(ownerKey)),project:any=app.workshop.create(member,'game').project,requestId=crypto.randomUUID(),runId='timestamp-run';
+ const member=app.auth.member(getPublicKey(ownerKey)),project:any=app.workshop.create(member,'dice').project,requestId=crypto.randomUUID(),runId='timestamp-run';
  await page.goto(new URL(`/?workshop=${app.workshop.id}&project=${project.id}`,server.url).toString());await expect(page.getByRole('heading',{name:'Talk with Agent 21'})).toBeVisible();
  app.workshop.request(member,project.id,{requestId,prompt:'Show durable activity timestamps',expectedRevisionId:project.current_revision},true);
  bindRun(app.db,requestId,runId);app.db.run("UPDATE requests SET status='building' WHERE id=?",[requestId]);

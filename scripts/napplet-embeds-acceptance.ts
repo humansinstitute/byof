@@ -29,7 +29,7 @@ try {
   await expect(page.locator('body')).not.toHaveAttribute('aria-busy','true');
   if(width===1440) await page.evaluate(async()=>{
     const account=await (await fetch('/api/v1/me')).json();
-    const response=await fetch('/api/v1/projects',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':account.csrf},body:JSON.stringify({starterId:'game'})});
+    const response=await fetch('/api/v1/projects',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':account.csrf},body:JSON.stringify({starterId:'dice'})});
     if(!response.ok)throw Error('Fixture project creation failed');
   });
   await page.reload();await openCanvas(page);await expect(page.locator('.napplet-card[data-project-id]')).toHaveCount(1);
@@ -40,44 +40,44 @@ try {
   await expect(card.locator('.eyebrow,.muted,.preview-controls')).toHaveCount(0);
   expect(await card.locator('.window-bar').evaluate(el=>el.getBoundingClientRect().height)).toBeLessThanOrEqual(45);
   expect(await card.locator('iframe').evaluate(el=>el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(width===390?140:380);
-  await expect.poll(()=>frame.locator('body').evaluate(()=>document.readyState)).toBe('complete');await card.locator('iframe').click({position:{x:5,y:5}});await frame.getByRole('button',{name:'Catch!'}).press('Enter');await expect(frame.locator('#score')).toHaveText('1');
+  await expect.poll(()=>frame.locator('body').evaluate(()=>document.readyState)).toBe('complete');await card.locator('iframe').click({position:{x:5,y:5}});await frame.getByRole('button',{name:'Go'}).press('Enter');await expect(frame.locator('#rolls span')).toHaveCount(100);
   const sources=await page.locator('iframe').evaluateAll(frames=>frames.map(f=>f.getAttribute('src')));expect(new Set(sources).size).toBe(sources.length);
   console.log('Settings',width);await card.getByRole('button',{name:/Settings for/}).click();await expect(page.getByRole('button',{name:'Rename',exact:true})).toBeFocused();await expect(page.getByRole('button',{name:'Edit your Napplet!',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Fork this Napplet and make it your own!',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Window options',exact:true})).toHaveCount(0);expect(await page.locator('#dialog').evaluate(el=>el.getBoundingClientRect().width<=innerWidth)).toBe(true);await page.keyboard.press('Escape');await expect(card.getByRole('button',{name:/Settings for/})).toBeFocused();
   let loads=0;page.on('request',r=>{if(r.url().includes('/preview?')){loads++;}});
   console.log('Settings',width);await card.getByRole('button',{name:/Settings for/}).click();await page.getByRole('button',{name:'Rename',exact:true}).click();
   await page.getByLabel('Napplet title').fill(title+' renamed');await page.getByRole('button',{name:'Save name'}).click();
-  await expect(card.locator('.window-bar h2')).toHaveText(title+' renamed');await expect(frame.locator('#score')).toHaveText('1');
+  await expect(card.locator('.window-bar h2')).toHaveText(title+' renamed');await expect(frame.locator('#rolls span')).toHaveCount(100);
   await page.getByRole('button',{name:'Open identity menu'}).click();await page.getByRole('button',{name:'Open identity menu'}).click();
-  await expect(frame.locator('#score')).toHaveText('1');
+  await expect(frame.locator('#rolls span')).toHaveCount(100);
   console.log('Minimize',width);await card.getByRole('button',{name:/Minimize /}).click();
   await expect(card.locator('iframe')).toBeHidden();
   await page.getByRole('button',{name:'Open identity menu'}).click();await page.getByRole('button',{name:'Open identity menu'}).click();
   await expect(card.getByRole('button',{name:/Restore /})).toHaveAttribute('aria-expanded','false');
   await card.getByRole('button',{name:/Restore /}).focus();await page.keyboard.press('Enter');
-  await expect(frame.locator('#score')).toHaveText('1');
+  await expect(frame.locator('#rolls span')).toHaveCount(100);
   const opener=card.getByRole('button',{name:'Open '+title+' renamed in larger viewer',exact:true});
   console.log('Minimize',width);await card.getByRole('button',{name:/Minimize /}).click();
   for(const mode of ['native','denied','unsupported']) {
    console.log('Expand',width,mode);await opener.click();const viewer=page.locator('.expanded-viewer');
    expect(await viewer.evaluate(el=>el.matches(':modal'))).toBe(true);
    await expect(viewer.locator('iframe')).toHaveAttribute('sandbox','allow-scripts allow-forms');
-   await expect(frame.locator('#score')).toHaveText('1');
+   await expect(frame.locator('#rolls span')).toHaveCount(100);
    if(mode!=='native')await page.evaluate(mode=>Object.defineProperty(document.documentElement,'requestFullscreen',{configurable:true,value:mode==='denied'?()=>Promise.reject(Error('denied')):undefined}),mode);
    await viewer.getByRole('button',{name:'Full screen',exact:true}).click();
    if(mode==='native')await expect.poll(()=>page.evaluate(()=>!!document.fullscreenElement)).toBe(true);
    else await expect(viewer).toHaveClass(/viewport-fullscreen/);
-   await frame.getByRole('button',{name:'Catch!'}).focus();await page.keyboard.press('Enter');await expect(frame.locator('#score')).toHaveText('2');
+   await frame.getByRole('button',{name:'Go'}).focus();await page.keyboard.press('Enter');await expect(frame.locator('#rolls span')).toHaveCount(100);
    await viewer.getByRole('button',{name:'Exit full screen'}).click();
    await viewer.getByRole('button',{name:'Close',exact:true}).focus();await page.keyboard.press('Tab');
    await expect.poll(()=>page.evaluate(()=>!!document.activeElement?.closest('.expanded-viewer'))).toBe(true);
    if(mode==='native')await viewer.getByRole('button',{name:'Close',exact:true}).click();
-   else {await frame.getByRole('button',{name:'Catch!'}).focus();await page.keyboard.press('Escape');}
-   await expect(page.locator('.expanded-viewer')).toHaveCount(0);await expect(opener).toBeFocused();await expect(frame.locator('#score')).toHaveText('2');
+   else {await frame.getByRole('button',{name:'Go'}).focus();await page.keyboard.press('Escape');}
+   await expect(page.locator('.expanded-viewer')).toHaveCount(0);await expect(opener).toBeFocused();await expect(frame.locator('#rolls span')).toHaveCount(100);
    // Reset only by interacting with the game, to repeat identical assertions.
    await frame.getByRole('button',{name:'Reset',exact:true}).focus();await page.keyboard.press('Enter');
-   await expect(frame.locator('#score')).toHaveText('0');
-   await frame.getByRole('button',{name:'Catch!'}).focus();await page.keyboard.press('Enter');
-   await expect(frame.locator('#score')).toHaveText('1');
+   await expect(frame.locator('#rolls span')).toHaveCount(100);
+   await frame.getByRole('button',{name:'Go'}).focus();await page.keyboard.press('Enter');
+   await expect(frame.locator('#rolls span')).toHaveCount(100);
   }
   await page.evaluate(()=>{delete (document.documentElement as any).requestFullscreen;});
   expect(loads).toBe(0);
@@ -93,9 +93,9 @@ try {
  const context=await browser.newContext(),page=await context.newPage();await signIn(page,generateSecretKey());
  const shared=page.locator('.napplet-card[data-project-id]').first(),frame=shared.frameLocator('iframe');
  await expect(shared.getByRole('button',{name:/Options for/})).toBeVisible();
- await expect.poll(()=>frame.locator('body').evaluate(()=>document.readyState)).toBe('complete');await frame.getByRole('button',{name:'Catch!'}).click();await expect(frame.locator('#score')).toHaveText('1');
+ await expect.poll(()=>frame.locator('body').evaluate(()=>document.readyState)).toBe('complete');await frame.getByRole('button',{name:'Go'}).click();await expect(frame.locator('#rolls span')).toHaveCount(100);
  const src=await shared.locator('iframe').getAttribute('src');expect(src).toContain(room.gallery[0].shared_revision);
- await shared.getByRole('button',{name:/in larger viewer/}).click();await expect(frame.locator('#score')).toHaveText('1');await page.keyboard.press('Escape');await expect(frame.locator('#score')).toHaveText('1');
+ await shared.getByRole('button',{name:/in larger viewer/}).click();await expect(frame.locator('#rolls span')).toHaveCount(100);await page.keyboard.press('Escape');await expect(frame.locator('#rolls span')).toHaveCount(100);
  await expect(shared.getByRole('button',{name:/Settings for/})).toHaveCount(0);
  await shared.getByRole('button',{name:/Options for/}).click();await expect(page.getByRole('button',{name:'Fork this Napplet and make it your own!',exact:true})).toBeFocused();await expect(page.getByRole('button',{name:'Rename',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Edit your Napplet!',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Window options',exact:true})).toHaveCount(0);await page.keyboard.press('Shift+Tab');expect(await page.evaluate(()=>document.activeElement?.closest('#dialog')?.id)).toBe('dialog');await page.getByRole('button',{name:'Close Napplet actions'}).click();await expect(shared.getByRole('button',{name:/Options for/})).toBeFocused();
  await shared.getByRole('button',{name:/Options for/}).click();await page.mouse.click(5,5);await expect(page.locator('#dialog')).not.toBeVisible();await expect(shared.getByRole('button',{name:/Options for/})).toBeFocused();

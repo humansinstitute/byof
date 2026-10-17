@@ -40,7 +40,7 @@ test('actual Freedom backend requires current member, exact bridge/Canvas/sessio
  async function bridge(p:any,a:Account,canvas?:string){const doc=await call(`projects/${p.id}/preview?revision=${p.current_revision}${canvas?'&workshop='+canvas:''}`,undefined,a,canvas);const opened=await call('napplet/open',{projectId:p.id,revisionId:p.current_revision,documentId:doc.data.documentId},a,canvas);expect(opened.status).toBe(200);return opened.data.token;}
  try{
   const a=await login(owner);app.db.run("UPDATE room SET admission='open' WHERE id=1");const b=await login(generateSecretKey());
-  const p=(await call('projects',{starterId:'blank'},a)).data.project,q=(await call('projects',{starterId:'blank'},b)).data.project;
+  const p=(await call('projects',{starterId:'spinner'},a)).data.project,q=(await call('projects',{starterId:'spinner'},b)).data.project;
   const ta=await bridge(p,a),tb=await bridge(q,b);
   const oa=await call('napplet/dataset',{token:ta,method:'open',dataset:definition},a),ob=await call('napplet/dataset',{token:tb,method:'open',dataset:binding},b);expect(oa.status).toBe(200);expect(ob.status).toBe(200);
   const ha=oa.data.handle,hb=ob.data.handle;

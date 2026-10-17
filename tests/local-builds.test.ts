@@ -18,7 +18,7 @@ test('real files: immutable versions, answers, duplicate completion, failed draf
  const dir=mkdtempSync('/private/tmp/byo-files-'),owner='a'.repeat(64),app=application({dataDir:dir,hostPubkey:null,origin:null,version:'test'});
  try{
   app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,'Builder','temporary','admitted',20,1]);
-  const member=app.auth.member(owner),p=app.workshop.create(member,'blank').project;
+  const member=app.auth.member(owner),p=app.workshop.create(member,'spinner').project;
   const cfg:any={ownerPubkey:owner,projectId:p.id,conversationKey:p.conversation_id,builderRoot:dir+'/napplets',workshopId:p.workshop_id,fileVersions:true,replacementEnabled:true};
   const scope={ownerPubkey:owner,builderRoot:cfg.builderRoot,workshopId:p.workshop_id,fileVersions:true,legacy:{ownerPubkey:owner,projectId:p.id,conversationKey:p.conversation_id,directory:'/old'}};
   const folder=projectRoute(p,cfg)!.directory!;expect(folder).toBe(`${dir}/napplets/${p.workshop_id}/${p.id}`);

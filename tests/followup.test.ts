@@ -11,7 +11,7 @@ function fixture() {
   const directory = mkdtempSync('/tmp/byo-followup-');
   const app = application({dataDir:directory,origin:'https://test.example',hostPubkey:null,version:'test'});
   const owner = getPublicKey(generateSecretKey()); app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,'Owner','temporary','admitted',20,1]);
-  const member = app.auth.member(owner), project = app.workshop.create(member,'game').project;
+  const member = app.auth.member(owner), project = app.workshop.create(member,'dice').project;
   const config = {projectId:project.id,ownerPubkey:owner,conversationKey:project.conversation_id} as FollowupConfig;
   const save = (id:string,mode='auto') => app.workshop.request(member,project.id,{requestId:id,prompt:'Exact instruction\n',expectedRevisionId:project.current_revision,mode},true) as any;
   return {app,member,project,config,save,close(){app.db.close();rmSync(directory,{recursive:true,force:true});}};

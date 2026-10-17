@@ -17,7 +17,7 @@ test('authenticated durable app data isolates session, participant, project and 
  async function login(key:Uint8Array,identityType='extension'){const c=await call('challenge',{});const r=await call('login',{challengeId:c.data.id,event:finalizeEvent(c.data.event,key),identityType});return {cookie:r.cookie,csrf:r.data.csrf};}
  try {
  const a=await login(secret);const temporarySession=await login(secret,'temporary');expect((await call('me',undefined,temporarySession)).data.member.identity_type).toBe('temporary');expect((await call('me',undefined,a)).data.member.identity_type).toBe('extension');app.db.run("UPDATE room SET admission='open' WHERE id=1");const b=await login(generateSecretKey());
- const p=(await call('projects',{starterId:'game'},a)).data.project;
+ const p=(await call('projects',{starterId:'dice'},a)).data.project;
  const open=await openProject(p.id,p.current_revision,a);expect(open.status).toBe(200);const token=open.data.token;
  const document=(await call(`projects/${p.id}/preview?revision=${p.current_revision}`,undefined,a)).data.documentId;
  expect((await call('napplet/open',{projectId:p.id,revisionId:p.current_revision,documentId:document},b)).status).toBe(403);
@@ -34,7 +34,7 @@ test('authenticated durable app data isolates session, participant, project and 
  expect((await call('napplet/data',{token,method:'get',key:'list'},a)).data.value).toEqual({items:['one']});
  const fork=(await call('projects',{forkProjectId:p.id,idempotencyKey:'latest-saved'},b));expect(fork.status).toBe(201);
  expect(fork.data.project.origin_revision).toBe(p.current_revision);
- const q=(await call('projects',{starterId:'game'},b)).data.project;
+ const q=(await call('projects',{starterId:'dice'},b)).data.project;
  const other=(await openProject(q.id,q.current_revision,b)).data.token;
  expect((await call('napplet/data',{token:other,method:'get',key:'list'},b)).data.value).toBeNull();
  expect((await openProject(p.id,q.current_revision,a)).status).toBe(403);
@@ -61,7 +61,7 @@ test('prompt migration replaces only the literal obsolete paragraph and preserve
  try {
  const original='Custom prefix\n\n'+obsoleteCapabilityParagraph+'\n\nCustom suffix';app.db.run('UPDATE builder_prompt SET text=?',[original]);const before=loadBuilderPrompt(app.db);
  const pubkey='a'.repeat(64);app.db.run("INSERT INTO members(pubkey,name,identity_type,state,created_at) VALUES(?,'Test','extension','admitted',1)",[pubkey]);
- const member=app.workshop.scoped(app.auth.member(pubkey)),project=app.workshop.create(member,'game').project;
+ const member=app.workshop.scoped(app.auth.member(pubkey)),project=app.workshop.create(member,'dice').project;
  const request=app.workshop.request(member,project.id,{requestId:'snapshot-before-migration',prompt:'hello',expectedRevisionId:project.current_revision},false) as any;
  const snapshot=requestBuilderPrompt(app.db,request.id);expect(snapshot?.text).toBe(original);
  installBuilderPrompt(app.db);const migrated=loadBuilderPrompt(app.db);expect(migrated.text).toBe(original.replace(obsoleteCapabilityParagraph,nappletCapabilityParagraph));expect(migrated.revision).toBe(before.revision+1);expect(requestBuilderPrompt(app.db,request.id)).toEqual(snapshot);installBuilderPrompt(app.db);expect(loadBuilderPrompt(app.db)).toEqual(migrated);

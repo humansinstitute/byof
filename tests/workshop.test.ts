@@ -17,7 +17,7 @@ async function login(secret = generateSecretKey(), body: any = {}): Promise<Acco
   expect(result.response.status).toBe(200); return {cookie:result.response.headers.get("set-cookie")!.split(";")[0]!,csrf:result.data.csrf,member:result.data.member,secret};
 }
 async function setup() { const host = await login(hostSecret,{host:true,name:"Test host"}); await call("/api/v1/host/settings",{title:"Test room",introduction:"Our room",lightning:"hello@getalby.com",paused:false,admission:"open"},host); return {host,a:await login(),b:await login()}; }
-async function create(account: Account, starterId = "todo") { const result = await call("/api/v1/projects",{starterId},account); expect(result.response.status).toBe(201); return result.data; }
+async function create(account: Account, starterId = "spinner") { const result = await call("/api/v1/projects",{starterId},account); expect(result.response.status).toBe(201); return result.data; }
 beforeEach(() => { directory = mkdtempSync("/tmp/liquid-freedom-test-"); hostSecret = generateSecretKey(); config = {dataDir:directory,hostPubkey:getPublicKey(hostSecret),origin,version:"test"}; app = application(config); });
 afterEach(() => { app.db.close(); rmSync(directory,{recursive:true,force:true}); });
 test("fresh login signature cannot be replayed, forged, or used for another origin or host", async () => {
@@ -31,7 +31,7 @@ test("fresh login signature cannot be replayed, forged, or used for another orig
 });
 test("unknown host cannot gain authority, default membership requires admission", async () => {
   const a = await login(); expect(a.member.host).toBe(false); expect(a.member.state).toBe("pending");
-  expect((await call("/api/v1/projects",{starterId:"todo"},a)).response.status).toBe(403);
+  expect((await call("/api/v1/projects",{starterId:"spinner"},a)).response.status).toBe(403);
   expect((await call("/api/v1/host/people",undefined,a)).response.status).toBe(403);
   const host = await login(hostSecret,{host:true});
   expect((await call(`/api/v1/host/members/${a.member.pubkey}`,{state:"admitted",allowance:20},host)).response.status).toBe(200);
@@ -40,8 +40,8 @@ test("unknown host cannot gain authority, default membership requires admission"
 test("an admitted member can create 100 Napplet projects but not exceed the documented capacity", async () => {
   const {a} = await setup();
   const member=app.auth.member(a.member.pubkey);
-  for (let i=0;i<100;i++) expect(app.workshop.create(member,"blank",undefined,true).project.id).toBeString();
-  expect(()=>app.workshop.create(member,"blank",undefined,true)).toThrow("Project capacity reached");
+  for (let i=0;i<100;i++) expect(app.workshop.create(member,"spinner",undefined,true).project.id).toBeString();
+  expect(()=>app.workshop.create(member,"spinner",undefined,true)).toThrow("Project capacity reached");
 });
 test("site administrator can raise only their own admitted build allowance within the configured cap", async()=>{
   const host=await login(hostSecret,{host:true});
@@ -66,7 +66,7 @@ test("builder details remain private; active previews admit participants; mutati
 });
 test("runnable starters have private SHA256 assets and restrictive preview sandbox", async () => {
   await setup(); const hashes = new Set();
-  for (const starterId of ["todo","game","quiz","meme","blank"]) {
+  for (const starterId of ["cashu","nostr","spinner","dice","pong"]) {
     const account = await login(), d = await create(account,starterId), revision = d.revisions[0]; hashes.add(revision.source_hash);
     const preview = await call(`/api/v1/projects/${d.project.id}/preview?revision=${revision.id}`,undefined,account);
     expect(preview.response.status).toBe(200); expect(preview.data).toContain("<!doctype html>");
@@ -197,7 +197,7 @@ test('host follow-up is explicit, owner-scoped, audited and idempotent without r
  expect(detail.execution.definition).toBe('https://autopilot.test/pipelines/definitions/owner-definition');
 });
 test('owner rename persists metadata only and rejects foreign, unsafe and unscoped writes', async () => {
-  const {host,a,b} = await setup(), d = await create(a,'game'), id=d.project.id;
+  const {host,a,b} = await setup(), d = await create(a,'dice'), id=d.project.id;
   await call(`/api/v1/projects/${id}/share`,{revisionId:d.project.current_revision},a);
   await call(`/api/v1/projects/${id}/consent`,{revisionId:d.project.current_revision,granted:true},a);
   const before=(await call(`/api/v1/projects/${id}`,undefined,a)).data;

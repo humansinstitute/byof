@@ -27,10 +27,10 @@ try {
     if (viewport.width === 390) {
       await page.getByRole('button', { name: '← Workshop page', exact: true }).click();
       await page.getByRole('button', { name: 'Fork', exact: true }).click();
-    } else await page.getByRole('button', { name: 'Use this starter' }).first().click();
+    } else await page.locator('.starter').filter({has:page.getByRole('heading',{name:'100 D6 rolls',exact:true})}).getByRole('button', { name: 'Use this starter' }).click();
     const frame = page.frameLocator('iframe');
-    await frame.getByRole('button', { name: 'Catch!' }).click();
-    await expect(frame.locator('#score')).toHaveText('1');
+    await frame.getByRole('button', { name: 'Go' }).click();
+    await expect(frame.locator('#rolls span')).toHaveCount(100);
     let previewLoads = 0; page.on('request', request => { if (request.url().includes('/preview?')) previewLoads++; });
     const previewResponse = await page.request.get(new URL((await page.locator('iframe').getAttribute('src'))!, server.url).href);
     expect(previewResponse.headers()['content-security-policy']).toContain('connect-src https: wss:');
@@ -40,20 +40,20 @@ try {
     await expect(viewer).toBeVisible();
     await expect(viewer.locator('iframe')).toHaveAttribute('sandbox', 'allow-scripts allow-forms');
     await expect(viewer.locator('iframe')).toHaveAttribute('referrerpolicy', 'no-referrer');
-    await expect(frame.locator('#score')).toHaveText('1');
+    await expect(frame.locator('#rolls span')).toHaveCount(100);
     expect(await viewer.evaluate(el => el.matches(':modal'))).toBe(true);
     await page.evaluate(() => window.postMessage({ type: 'freedom-preview-escape' }, '*'));
     await expect(viewer).toBeVisible();
     await viewer.getByRole('button', { name: 'Full screen', exact: true }).click();
     await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
     await expect(viewer.getByRole('button', { name: 'Exit full screen' })).toBeVisible();
-    await frame.getByRole('button', { name: 'Catch!' }).click();
-    await expect(frame.locator('#score')).toHaveText('2');
+    await frame.getByRole('button', { name: 'Go' }).click();
+    await expect(frame.locator('#rolls span')).toHaveCount(100);
     await viewer.getByRole('button', { name: 'Exit full screen' }).click();
     await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(false);
     await viewer.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(open).toBeFocused();
-    await expect(frame.locator('#score')).toHaveText('2');
+    await expect(frame.locator('#rolls span')).toHaveCount(100);
     expect(previewLoads).toBe(0);
     // Browser denial and missing API both take the viewport fallback.
     for (const mode of ['denied', 'unsupported']) {
@@ -66,14 +66,14 @@ try {
       await viewer.getByRole('button', { name: 'Close', exact: true }).focus();
       await page.keyboard.press('Tab');
       expect(await page.evaluate(() => !!document.activeElement?.closest('.expanded-viewer'))).toBe(true);
-      await frame.getByRole('button', { name: 'Catch!' }).focus();
+      await frame.getByRole('button', { name: 'Go' }).focus();
       await page.keyboard.press('Escape');
       await expect(viewer).not.toHaveClass(/viewport-fullscreen/);
       await expect(viewer).toBeVisible();
       await page.keyboard.press('Escape');
       await expect(page.locator('.expanded-viewer')).toHaveCount(0);
       await expect(open).toBeFocused();
-      await expect(frame.locator('#score')).toHaveText('2');
+      await expect(frame.locator('#rolls span')).toHaveCount(100);
     }
     await page.evaluate(() => { delete (document.documentElement as any).requestFullscreen; });
     expect(previewLoads).toBe(0);
@@ -86,8 +86,8 @@ try {
     const tryApp = page.getByRole('button', { name: 'Try app', exact: true });
     await tryApp.click();
     await expect(viewer).toBeVisible();
-    await expect(viewer.getByRole('heading', { name: 'Small game', exact: true })).toBeVisible();
-    await expect(frame.getByRole('button', { name: 'Catch!' })).toBeVisible();
+    await expect(viewer.getByRole('heading', { name: '100 D6 rolls', exact: true })).toBeVisible();
+    await expect(frame.getByRole('button', { name: 'Go' })).toBeVisible();
     expect(await viewer.evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThan(viewport.width * .9);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: `${evidence}/${viewport.width}-gallery.png` });

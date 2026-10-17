@@ -10,7 +10,7 @@ function fixture(){
  const dir=mkdtempSync('/tmp/builder-prompt-'),owner='a'.repeat(64);
  const app=application({dataDir:dir,hostPubkey:owner,origin:'https://test.example',version:'test'});
  app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,'Host','extension','admitted',20,1]);
- const member=app.auth.member(owner),project=app.workshop.create(member,'blank').project;
+ const member=app.auth.member(owner),project=app.workshop.create(member,'spinner').project;
  const config={projectId:project.id,ownerPubkey:owner,conversationKey:project.conversation_id,directory:'/fixed'} as any;
  const save=(id:string)=>app.workshop.request(member,project.id,{requestId:id,prompt:'What could we improve?\n',expectedRevisionId:project.current_revision},true) as any;
  return {app,member,project,config,save,close(){app.db.close();rmSync(dir,{recursive:true,force:true});}};

@@ -22,7 +22,7 @@ try{
   });
   await page.route('**/api/v1/projects/*/requests',async route=>{if(route.request().method()!=='POST')return route.continue();submissions.push(JSON.parse(route.request().postData()||'{}'));return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({generationAvailable:false,request:{status:'unavailable'}})});});
   await page.exposeFunction('fixtureSign',(event:any)=>finalizeEvent(event,key));await page.addInitScript(()=>{(window as any).nostr={signEvent:(event:any)=>(window as any).fixtureSign(event)}});
-  app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,'Paste acceptance','extension','admitted',20,1]);const project=app.workshop.create(app.auth.member(owner),'blank').project;
+  app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,'Paste acceptance','extension','admitted',20,1]);const project=app.workshop.create(app.auth.member(owner),'spinner').project;
   const token=crypto.randomUUID(),hash=createHash('sha256').update(token).digest('hex');app.db.run('INSERT INTO sessions(hash,pubkey,csrf,expires_at,identity_type) VALUES(?,?,?,?,?)',[hash,owner,'csrf',Math.floor(Date.now()/1000)+3600,'extension']);
   await page.context().addCookies([{name:'lf_session',value:token,url:config.origin,httpOnly:true,sameSite:'Strict'}]);await page.goto(`${config.origin}/?workshop=${app.workshop.id}&project=${project.id}`);
   await page.getByRole('tab',{name:'Chat',exact:true}).click();

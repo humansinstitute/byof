@@ -15,7 +15,7 @@ test('real authenticated WebSocket restores progress after reconnect, isolates p
  try{
   const owner=getPublicKey(generateSecretKey()),other=getPublicKey(generateSecretKey());
   for(const pub of [owner,other])app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[pub,'Participant','temporary','admitted',20,1]);
-  const member=app.auth.member(owner),project=app.workshop.create(member,'game').project,requestId='question';
+  const member=app.auth.member(owner),project=app.workshop.create(member,'dice').project,requestId='question';
   const v2=app.workshop.addRevision(app.workshop.project(member,project.id),app.workshop.assets.put('<html><body>v2</body></html>'),owner);
   const v3=app.workshop.addRevision(app.workshop.project(member,project.id),app.workshop.assets.put('<html><body>v3</body></html>'),owner);project.current_revision=v3;
   app.workshop.request(member,project.id,{requestId,prompt:'What next?',expectedRevisionId:project.current_revision},true);bindRun(app.db,requestId,'run');

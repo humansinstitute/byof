@@ -12,7 +12,7 @@ async function call(path:string,account?:Account,body?:any,headers:any={}) {
 }
 async function login(key=generateSecretKey()):Promise<Account>{const c=(await call('challenge',undefined,{})).data;const r=await call('login',undefined,{challengeId:c.id,event:finalizeEvent(c.event,key),identityType:'extension',name:'Board test'});expect(r.status).toBe(200);return{cookie:r.cookie!,csrf:r.data.csrf,member:r.data.member};}
 async function setup(){const host=await login(hostKey);await call('host/settings',host,{title:'Board',introduction:'Test',admission:'open',lightning:'',paused:false});return{host,a:await login(),b:await login()};}
-async function create(a:Account,starterId='game'){return(await call('projects',a,{starterId})).data.project;}
+async function create(a:Account,starterId='dice'){return(await call('projects',a,{starterId})).data.project;}
 const room=async(a:Account)=>(await call('room',a)).data;
 beforeEach(()=>{dir=mkdtempSync('/tmp/freedom-board-');hostKey=generateSecretKey();app=application({origin,hostPubkey:getPublicKey(hostKey),dataDir:dir,version:'board-test'});});
 afterEach(()=>{app.db.close();rmSync(dir,{recursive:true,force:true});});
@@ -86,7 +86,7 @@ test('workshop boundaries remain independent while the scoped host can edit part
  expect((await call(`projects/${p.id}/preview?revision=${p.current_revision}`,b,undefined,headers)).status).toBe(403);
  await call('workshops/join',a,{},headers);await call('host/settings',a,{title:'Other',introduction:'Test',paused:false,admission:'open',lightning:''},headers);await call('workshops/join',b,{},headers);
  expect((await call(`projects/${p.id}/preview?revision=${p.current_revision}`,b,undefined,headers)).status).toBe(404);
- const other=(await call('projects',b,{starterId:'game'},headers)).data.project;
+ const other=(await call('projects',b,{starterId:'dice'},headers)).data.project;
  const board=(await call('room',a,undefined,headers)).data.board;
  expect((await call('board',b,{expectedVersion:board.version,objects:board.objects},headers)).status).toBe(403);
  expect((await call('board',a,{expectedVersion:board.version,objects:board.objects},headers)).status).toBe(200);
@@ -95,7 +95,7 @@ test('workshop boundaries remain independent while the scoped host can edit part
 });
 
 test('unbuilt active app remains visible as metadata without a preview, until a completed checkpoint appears',async()=>{
- const {host,a,b}=await setup(),p=await create(a,'blank');const source=p.current_revision;
+ const {host,a,b}=await setup(),p=await create(a,'spinner');const source=p.current_revision;
  app.db.run('UPDATE projects SET current_revision=NULL WHERE id=?',[p.id]);
  const unbuilt=(await room(b)).board;expect(unbuilt.napplets[0].current_revision).toBeNull();expect(unbuilt.objects.find((o:any)=>o.kind==='napplet').projectId).toBe(p.id);
  expect((await call(`projects/${p.id}/preview?revision=${source}`,b)).status).toBe(404);

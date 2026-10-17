@@ -41,7 +41,7 @@ export function installNappletHost(context) {
       if(frame.dataset.workshop!==c.workshop||!/^[a-f0-9-]{36}$/.test(frame.dataset.project||'')||!/^[a-f0-9-]{36}$/.test(frame.dataset.revision||'')||!/^[a-f0-9]{64}$/.test(frame.dataset.sourceHash||'')||frame.getAttribute('sandbox')!=='allow-scripts allow-forms')continue;
       const b={frame,window:frame.contentWindow,key,stamp:stamp(),workshop:c.workshop,user:c.member.pubkey,project:frame.dataset.project,revision:frame.dataset.revision,closed:false,loaded:false,controllers:new Set(),inflight:0,seen:0,lastId:0,identityGranted:false,relays:new Map(),relaySequence:0,unacked:new Map()};
       frames.set(frame,b);
-      frame.addEventListener('load',()=>{if(b.loaded){close(b);}b.loaded=true;});
+      frame.addEventListener('load',()=>{if(frame.dataset.runtimeReady!=='true')return;if(b.loaded){close(b);}b.loaded=true;});
     }
     revoke.hidden=![...frames.values()].some(b=>valid(b));
   }
