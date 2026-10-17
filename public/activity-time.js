@@ -1,4 +1,5 @@
 const validInstant = value => {
+  if (value === null || value === undefined || typeof value === 'boolean') return null;
   const date = new Date(value);
   return Number.isFinite(date.getTime()) ? date : null;
 };

@@ -44,6 +44,15 @@ test('unknown send reconciliation keeps immutable native identity and never crea
   expect(f.input()).toEqual(original);expect(builderEpoch(f.app.workshop,f.project).generation).toBe(0);expect(f.app.auth.member('a').allowance).toBe(20);
  }finally{f.close()}
 });
+test('ambiguous execution is not advertised as manually recoverable without verified evidence',async()=>{
+ const f=fixture();try{
+  await dispatchReplacement(f.app.workshop,f.member,f.project.id,'q',f.config,f.transport);
+  f.setStatus('uncertain');f.setError('Lost response');f.fail();
+  const request=f.app.workshop.detail(f.member,f.project.id).requests.find((row:any)=>row.id==='q');
+  expect(request.status).toBe('execution_uncertain');
+  expect(request.recoverable).toBe(false);
+ }finally{f.close()}
+});
 test('timeouts, active ordinary claims, ambiguous launches and mismatched correlation are never fresh-safe evidence',()=>{
  const e:any={status:'error',result:{turn:{status:'preparing',receiptId:'r',error:'Completed-turn session has unrelated queued prompts'}}};
  expect(confirmedPreSend(e)).toBe(true);

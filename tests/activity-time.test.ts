@@ -11,6 +11,7 @@ test('Perth event labels distinguish today, earlier dates and missing timestamps
  });
  expect(perthEventTime('2026-10-14T15:59:00.000Z','Received',now)?.text).toBe('Received 14 Oct, 11:59 pm AWST');
  expect(perthEventTime('', 'Received',now)).toBeNull();
+ expect(perthEventTime(null, 'Received',now)).toBeNull();
  expect(perthEventTime('invalid', 'Received',now)).toBeNull();
 });
 
