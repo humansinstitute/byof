@@ -1,4 +1,5 @@
 import {installAgentPublication} from './agent-publication.ts';
+import {installHostedPublication} from './hosted-publication.ts';
 import { installActivityTables } from './activity-store.ts';
 import {installBuilderEngines} from './builder-engine.ts';
 import { installBuilderPrompt } from './builder-prompt.ts';
@@ -80,6 +81,7 @@ export function openDatabase(directory: string): Database {
     WHEN NOT EXISTS(SELECT 1 FROM revisions r JOIN projects source ON source.id=r.project_id JOIN projects fork ON fork.id=NEW.project_id WHERE r.id=NEW.source_revision AND source.id=NEW.source_project AND source.workshop_id=NEW.workshop_id AND fork.workshop_id=NEW.workshop_id AND fork.owner=NEW.actor)
     BEGIN SELECT RAISE(ABORT,'fork project mismatch'); END;`);
   installAgentPublication(db);
+  installHostedPublication(db);
   installBuilderPrompt(db);installBuilderEngines(db);
   installActivityTables(db);
   return db;

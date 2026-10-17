@@ -114,6 +114,8 @@ export class Site {
             this.db.run(`DELETE FROM publication_claims WHERE snapshot_id IN (${snapshotScope})`,[id]);
             this.db.run(`DELETE FROM publication_operations WHERE snapshot_id IN (${snapshotScope})`,[id]);
             this.db.run("DELETE FROM publication_snapshots WHERE json_extract(body_json,'$.workshopId')=?",[id]);
+            this.db.run('DELETE FROM hosted_publication_exclusions WHERE workshop_id=?',[id]);
+            this.db.run('DELETE FROM hosted_publications WHERE workshop_id=?',[id]);
 
             this.db.run(`DELETE FROM activity_receipts WHERE run_id IN (SELECT run_id FROM activity_authority WHERE workshop_id=? OR project_id IN (${projectScope})) OR run_id IN (SELECT invocation_run_id FROM activity_recovery_lineage WHERE request_id IN (${requestScope}))`,[id,id,id]);
             this.db.run(`DELETE FROM activity_turns WHERE run_id IN (SELECT run_id FROM activity_authority WHERE workshop_id=? OR project_id IN (${projectScope}))`,[id,id]);

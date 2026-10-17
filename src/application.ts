@@ -31,6 +31,8 @@ import { demand, HttpError } from "./errors.ts";
 import { installDeliveryTables, storeDelivery } from "./delivery-store.ts";
 import { verifyDelivery, DeliveryDenied } from "./pipeline/receiver.ts";
 import { Publication } from "./publication.ts";
+import {HostedPublication} from './hosted-publication.ts';
+import {publicCanvasPage} from './public-canvas.ts';
 import { dispatchApprovedRequest } from "./pipeline/operator-dispatch.ts";
 import { dispatchFollowup, resumeFollowup, followupAvailable } from "./pipeline/followup-dispatch.ts";
 import {beginAgentPublication,beginRemoteAgentPublication,registerAgentPublication,publicationAuthority} from './agent-publication.ts';
@@ -149,12 +151,36 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport?:(s
         const delivery = verifyDelivery({ body: raw, authorization: request.headers.get("authorization"), publicUrl: `${config.origin}${path}`, signerPubkey: config.callbackSignerPubkey, deliveryHeader: request.headers.get("x-wingman-delivery-id"), runHeader: request.headers.get("x-wingman-run-id") });
         return json({ handling: storeBuilderDeletion(workshop,delivery) ?? storeDelivery(db, delivery, workshop) });
       }
+      const publicPage=path.match(/^\/p\/([a-z0-9]+(?:-[a-z0-9]+)*)$/);
+      if(publicPage&&method==='GET'){
+        const found=HostedPublication.lookup(db,publicPage[1]!);demand(found,404,'Public Canvas not found');
+        return new Response(publicCanvasPage(found.alias,found.version,found.snapshot),{headers:{...security,'content-type':'text/html; charset=utf-8','content-security-policy':"default-src 'self'; script-src 'self'; style-src 'self'; frame-src 'self'; img-src 'self' https: data:; connect-src 'self' https: wss://relay.primal.net wss://nos.lol wss://relay.damus.io wss://purplepag.es; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"}});
+      }
+      const publicApp=path.match(/^\/p\/([a-z0-9]+(?:-[a-z0-9]+)*)\/apps\/([a-f0-9-]{36})$/);
+      if(publicApp&&method==='GET'){
+        const found=HostedPublication.lookup(db,publicApp[1]!);demand(found,404,'Published Napplet not found');const app=found.snapshot.napplets.find(p=>p.projectId===publicApp[2]);demand(app,404,'Published Napplet not found');
+        const project=db.query('SELECT hidden,owner FROM projects WHERE id=? AND workshop_id=?').get(app.projectId,found.snapshot.workshopId) as any;
+        const excluded=db.query('SELECT excluded FROM hosted_publication_exclusions WHERE workshop_id=? AND project_id=?').get(found.snapshot.workshopId,app.projectId) as any;
+        const publicWorkshop=new Workshop(db,workshop.assets,found.snapshot.workshopId);demand(project&&!project.hidden&&!excluded?.excluded&&publicWorkshop.projectOwnerAccess(project.owner)?.state==='admitted',404,'Published Napplet not found');
+        const storage=site.storage(found.snapshot.workshopId),source=storage?await remotePreview(publicWorkshop,storage,app.revisionId).catch(()=>null):null;
+        const payload=source??publicWorkshop.assets.get(app.sourceHash);demand(sha256(payload)===app.sourceHash,500,'Published Napplet integrity check failed');
+        let documentId=crypto.randomUUID();try{const active=auth.session(request),member=publicWorkshop.scoped(active.member);publicWorkshop.admitted(member);documentId=nappletData.issueDocument(publicWorkshop,member,active.sessionHash,app.projectId,app.revisionId);}catch{}
+        return new Response(injectNappletBridge(payload,documentId),{headers:{...security,'content-type':'text/html; charset=utf-8','content-security-policy':previewPolicy,'permissions-policy':'camera=(), microphone=(), geolocation=(), payment=()'}});
+      }
+      const publicImage=path.match(/^\/p\/([a-z0-9]+(?:-[a-z0-9]+)*)\/images\/([a-f0-9]{64})$/);
+      if(publicImage&&method==='GET'){
+        const found=HostedPublication.lookup(db,publicImage[1]!);demand(found,404,'Published picture not found');const row=db.query('SELECT mime FROM workshop_board_images WHERE workshop_id=? AND hash=?').get(found.snapshot.workshopId,publicImage[2]!) as any;demand(row&&found.snapshot.objects.some(o=>o.kind==='image'&&o.src?.includes(publicImage[2]!)),404,'Published picture not found');return new Response(new Uint8Array(workshop.assets.getBytes(publicImage[2]!)),{headers:{...security,'content-type':row.mime,'content-security-policy':"default-src 'none'; sandbox",'cache-control':'public, max-age=31536000, immutable'}});
+      }
+      if(path.startsWith('/p/')&&method==='GET')throw new HttpError(404,'Public Canvas not found');
+      if(path==='/api/v1/public/session'&&method==='GET'){
+        const alias=url.searchParams.get('alias')||'',found=HostedPublication.lookup(db,alias);demand(found,404,'Public Canvas not found');const active=auth.session(request),publicWorkshop=new Workshop(db,workshop.assets,found.snapshot.workshopId),member=publicWorkshop.scoped(active.member);publicWorkshop.admitted(member);return json({member,csrf:active.csrf});
+      }
       if (mutation) demand(request.headers.get("origin") === origin, 403, "Request origin does not match this workshop");
       // Browser navigation uses configured identity, never forwarded headers.
       // Alternate managed port/mesh entry pages move here before authentication.
       if (path === "/api/v1/browser-origin" && method === "GET") return json({ origin });
       if (["/health","/api/health"].includes(path) && method === "GET") {const capable=workshopBuilders(config.followup);const publicationAvailable=!!capable?.agentPublication&&!!(config.storage||config.managedStorage||config.storageTemplates?.length||config.workshopStorage?.length);return json({ status: "ok", service: "liquid-freedom", version: config.version, build: await Bun.file(join(import.meta.dir, "../tmp/build/assets.json")).json().catch(() => null), hostConfigured: !!config.hostPubkey, generation: { available: !!capable?.memberWorkshops && !capable.suspended, operatorApprovedBuildAvailable: !!config.operatorBuild, ownerProjectFollowupAvailable: !!config.followup && !config.followup.suspended, ownerProjectFollowupSuspended: !!config.followup?.suspended, reason: "Installed workshop builders require active admission, project ownership and available allowance" }, publication: { available: publicationAvailable, reason: publicationAvailable?"Agent-tool publication is installed; each Canvas still requires its verified private storage binding.":"Awaiting installed agent-tool publication and managed storage authority" }, limits });}
-      if (["/", "/app.js", "/activity-time.js", "/chat-attachments.js", "/invitation-url.js", "/napplet-host.js", "/napplet-cache.js", "/canvas-host.js", "/identity.js", "/napplet.d.ts", "/style.css"].includes(path) && method === "GET") {
+      if (["/", "/app.js", "/activity-time.js", "/chat-attachments.js", "/invitation-url.js", "/napplet-host.js", "/napplet-cache.js", "/canvas-host.js", "/identity.js", "/napplet.d.ts", "/style.css", "/public-canvas.js", "/public-canvas.css"].includes(path) && method === "GET") {
         const file = Bun.file(join(import.meta.dir, "../public", path === "/" ? "index.html" : path.slice(1)));
         demand(await file.exists(), 503, "Managed build required");
         return new Response(file, { headers: { ...security, "cache-control": "no-store", "content-type": path.endsWith(".js") ? "application/javascript" : path.endsWith(".css") ? "text/css" : path.endsWith(".d.ts") ? "text/plain; charset=utf-8" : "text/html", "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https: wss://relay.primal.net wss://nos.lol wss://relay.damus.io wss://purplepag.es; frame-src 'self'; img-src 'self' https: data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'" } });
@@ -193,6 +219,7 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport?:(s
       workshop.storageReady=!(workshop.roomRow().tower_id||selectedStorage)||!!selectedStorage&&storageStatus(workshop,selectedStorage).state==='ready';
       workshop.storageRequired=!!selectedStorage;
       publication=new Publication(db,workshop,workshop.assets);
+      const hostedPublication=new HostedPublication(db,workshop);
       const attachmentCreate=path.match(/^\/api\/v1\/projects\/([^/]+)\/attachments$/);
       if(attachmentCreate&&method==='POST')return json(await prepareChatAttachment(workshop,member,config.storage,attachmentCreate[1]!,body),202);
       const attachmentRead=path.match(/^\/api\/v1\/projects\/([^/]+)\/attachments\/([^/]+)$/);
@@ -328,6 +355,10 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport?:(s
       if (path === "/api/v1/host/publication/prepare" && method === "POST") return json({ snapshot: publication.prepare(member, body.selections, body.siteName), public: false, published: false }, 201);
       if (path === "/api/v1/host/publication" && method === "GET") return json({ candidates: workshop.publicationCandidates(member), available: false, receipts: publication.list(member), reason: "Publication unavailable: approved publication signer, Blossom storage, relays, current-spec exporter and remote verification are required." });
       if (path === "/api/v1/host/publication" && method === "POST") { workshop.host(member); throw new HttpError(503, "Publication unavailable; no public assets or events were created"); }
+      if(path==='/api/v1/host/hosted-publication'&&method==='GET')return json(hostedPublication.status(member));
+      if(path==='/api/v1/host/hosted-publication'&&method==='POST')return json(hostedPublication.publish(member,body),201);
+      const hostedInclusion=path.match(/^\/api\/v1\/host\/hosted-publication\/projects\/([a-f0-9-]{36})$/);
+      if(hostedInclusion&&method==='POST')return json(hostedPublication.inclusion(member,hostedInclusion[1]!,body.included));
       throw new HttpError(404, "Route not found");
     } catch (error) { if (error instanceof DeliveryDenied) return json({ error: error.message }, 401); if (error instanceof HttpError) return json({ error: error.message }, error.status); console.error("Application request failed", error instanceof Error ? {path:new URL(request.url).pathname,name:error.name,message:error.message,code:(error as NodeJS.ErrnoException).code??null} : {path:new URL(request.url).pathname,name:"unknown"}); return json({ error: "Internal error; operation did not complete" }, 500); }
   }
