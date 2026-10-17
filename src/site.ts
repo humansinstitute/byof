@@ -147,7 +147,7 @@ export class Site {
             this.db.run(`DELETE FROM revisions WHERE project_id IN (${projectScope})`,[id]);
             this.db.run('DELETE FROM projects WHERE workshop_id=?',[id]);
 
-            for(const table of ['canvas_create_intents','invitations','moderation','workshop_board_images','workshop_boards','builder_engines','tower_storage_grants','workshop_storage_bindings','managed_workshop_storage','workshop_members','workshop_prompts'])
+            for(const table of ['canvas_create_intents','invitations','moderation','workshop_board_images','workshop_boards','builder_engines','canvas_dataset_bindings','tower_storage_grants','workshop_storage_bindings','managed_workshop_storage','workshop_members','workshop_prompts'])
                 this.db.run(`DELETE FROM ${table} WHERE workshop_id=?`,[id]);
             demand(this.db.run('DELETE FROM workshops WHERE id=?',[id]).changes===1,404,'Canvas not found');
 

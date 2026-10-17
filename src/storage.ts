@@ -4,7 +4,7 @@ import { publicKey } from './config.ts';
 import { readLocalCandidate } from './local-builds.ts';
 import { sha256 } from './assets.ts';
 import { demand } from './errors.ts';
-import { storageTarget, uuid, type StorageTarget } from './tower-storage-client.ts';
+import { storageTarget, uuid, type StorageTarget, type StorageTransport } from './tower-storage-client.ts';
 import { now, type Member } from './auth.ts';
 import { ManagedPipelineClient } from './pipeline/managed-client.ts';
 import { storeDelivery } from './delivery-store.ts';
@@ -13,12 +13,14 @@ import type { VerifiedDelivery } from './pipeline/receiver.ts';
 import { verifyEvent } from 'nostr-tools';
 import { ensureBuilderDirectory } from './pipeline/project-directory.ts';
 import { resolve } from 'node:path';
-import { canvasBrokerBindingStatus } from './canvas-broker.ts';
+import { canvasBrokerBindingStatus, canvasDatasetNpub, canvasTransport } from './canvas-broker.ts';
+import { CanvasDatasetStore } from './canvas-datasets.ts';
 export type StorageConfig={installationId:string;appPubkey:string;appNpub:string;towerOrigin:string;workshopId:string;localRoot:string;signupGatewayOrigin?:string;pipeline:OperatorBuildConfig};
 export function installStorageTables(workshop:Workshop){workshop.db.exec(`
  CREATE TABLE IF NOT EXISTS storage_binding(id INTEGER PRIMARY KEY CHECK(id=1),installation_id TEXT NOT NULL,workshop_id TEXT NOT NULL,target_json TEXT NOT NULL,local_root TEXT NOT NULL,status TEXT NOT NULL,probe_job_id TEXT,connected_actor TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS workshop_storage_bindings(workshop_id TEXT PRIMARY KEY,installation_id TEXT NOT NULL,target_json TEXT NOT NULL,local_root TEXT NOT NULL,status TEXT NOT NULL,probe_job_id TEXT,connected_actor TEXT NOT NULL,namespace_json TEXT);
  CREATE TABLE IF NOT EXISTS tower_storage_grants(workshop_id TEXT PRIMARY KEY,installation_id TEXT NOT NULL,target_json TEXT NOT NULL,actor TEXT NOT NULL,namespace_event TEXT NOT NULL,invite_event TEXT NOT NULL,authorized_at INTEGER NOT NULL);
+ CREATE TABLE IF NOT EXISTS canvas_dataset_bindings(workshop_id TEXT PRIMARY KEY,installation_id TEXT NOT NULL,target_json TEXT NOT NULL,status TEXT NOT NULL,connected_actor TEXT NOT NULL,namespace_event TEXT NOT NULL,invite_event TEXT NOT NULL,proof_json TEXT,error TEXT,verified_at INTEGER);
  CREATE TABLE IF NOT EXISTS tower_setup_operations(event_id TEXT PRIMARY KEY,url TEXT NOT NULL,payload TEXT NOT NULL,result_json TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS storage_connections(actor TEXT PRIMARY KEY,tower_origin TEXT NOT NULL,workspaces_json TEXT NOT NULL,connected_at INTEGER NOT NULL);
  CREATE TABLE IF NOT EXISTS storage_jobs(id TEXT PRIMARY KEY,operation TEXT NOT NULL,request_id TEXT UNIQUE,original_run_id TEXT,candidate_json TEXT,target_json TEXT NOT NULL,file_name TEXT NOT NULL,sha256 TEXT NOT NULL,size_bytes INTEGER NOT NULL,base64 TEXT NOT NULL,status TEXT NOT NULL,object_id TEXT,artifact_json TEXT,run_id TEXT,attempt INTEGER NOT NULL DEFAULT 0,read_base64 TEXT,error TEXT);
@@ -41,9 +43,29 @@ export function storageBinding(workshop:Workshop,config?:StorageConfig){
 export function storageStatus(workshop:Workshop,config?:StorageConfig,env=process.env){
  const binding=storageBinding(workshop,config),probe:any=binding?.probe_job_id?workshop.db.query('SELECT id,status,error,artifact_json FROM storage_jobs WHERE id=?').get(binding.probe_job_id):null;
  const state=!config?'disconnected':!binding?'needs_authorization':probe?.error?'error':binding.status==='ready'&&binding.namespace_json?'ready':binding.status==='probing'?'probing':'needs_authorization';
- const datasetDiscovery=config&&binding?canvasBrokerBindingStatus({installationId:config.installationId,target:binding.target,canvasId:workshop.id,user:''},env):null;
- return {state,namespace:binding?.namespace_json?JSON.parse(binding.namespace_json):null,namespaceReady:!!binding?.namespace_json,signupGatewayOrigin:config?.signupGatewayOrigin,configured:!!config,installationId:config?.installationId,appNpub:config?.appNpub,towerOrigin:config?.towerOrigin,workshopId:config?.workshopId,localRoot:config?.localRoot,binding,probe,datasetDiscovery};
+ const datasetRow=config?workshop.db.query('SELECT * FROM canvas_dataset_bindings WHERE workshop_id=?').get(workshop.id) as any:null;
+ let datasetTarget:StorageTarget|undefined,datasetNpub:string|undefined,datasetDiscovery:any=null;
+ try{datasetNpub=canvasDatasetNpub(env);}catch(error){datasetDiscovery={code:'broker_unavailable',canvasOrigin:binding?.target.towerUrl??config?.towerOrigin??'',managedOrigin:null,message:error instanceof Error?error.message:'Canvas dataset identity is unavailable',transport:null};}
+ if(datasetRow){
+  datasetTarget=storageTarget(JSON.parse(datasetRow.target_json));
+  if(!config||datasetRow.installation_id!==config.installationId||datasetTarget.towerUrl!==config.towerOrigin)throw Error('dataset_binding_config_changed');
+  const transport=canvasBrokerBindingStatus({installationId:config.installationId,target:datasetTarget,canvasId:workshop.id,user:''},env);
+  datasetDiscovery=datasetRow.status==='ready'?transport:{...transport,code:'dataset_binding_required',message:datasetRow.error||'Complete setup and authorize the displayed Canvas dataset identity'};
+ }else if(config&&binding&&datasetNpub)datasetDiscovery={code:'dataset_binding_required',canvasOrigin:binding.target.towerUrl,managedOrigin:null,message:'Complete setup and authorize the displayed Canvas dataset identity',transport:null,signerNpub:datasetNpub};
+ const dataset=datasetRow?{status:datasetRow.status,target:datasetTarget,appNpub:datasetTarget?.appNpub,proof:datasetRow.proof_json?JSON.parse(datasetRow.proof_json):null,error:datasetRow.error??null,verifiedAt:datasetRow.verified_at??null}:{status:'needs_authorization',target:null,appNpub:datasetNpub??null,proof:null,error:null,verifiedAt:null};
+ const setupState=state==='ready'&&dataset.status==='ready'&&datasetDiscovery?.code==='exact_match'?'ready':state==='probing'?'probing':state==='error'?'error':'needs_authorization';
+ return {state,setupState,namespace:binding?.namespace_json?JSON.parse(binding.namespace_json):null,namespaceReady:!!binding?.namespace_json,signupGatewayOrigin:config?.signupGatewayOrigin,configured:!!config,installationId:config?.installationId,appNpub:config?.appNpub,datasetAppNpub:datasetNpub??null,towerOrigin:config?.towerOrigin,workshopId:config?.workshopId,localRoot:config?.localRoot,binding,dataset,probe,datasetDiscovery};
 }
+
+export function datasetTarget(workshop:Workshop,config:StorageConfig){
+ const row=workshop.db.query('SELECT * FROM canvas_dataset_bindings WHERE workshop_id=?').get(workshop.id) as any;
+ demand(row&&row.installation_id===config.installationId&&row.status==='ready',503,'Canvas dataset setup is incomplete');
+ const target=storageTarget(JSON.parse(row.target_json));
+ demand(target.towerUrl===config.towerOrigin,409,'Canvas dataset authority changed');
+ return target;
+}
+
+export function revokeDatasetBinding(workshop:Workshop){workshop.db.run("UPDATE canvas_dataset_bindings SET status='needs_authorization',error='Tower revoked Canvas dataset authority' WHERE workshop_id=?",[workshop.id]);}
 export function verifyStorageAuth(request:Request,raw:string,pubkey:string,origin:string){
  let event:any;try{event=JSON.parse(Buffer.from((request.headers.get('authorization')||'').replace(/^Nostr /,''),'base64').toString());}catch{}
  const tag=(name:string)=>{const rows=event?.tags?.filter((t:string[])=>t[0]===name);return rows?.length===1&&rows[0].length===2?rows[0][1]:undefined;};
@@ -170,6 +192,40 @@ export function reusableStorageGrant(workshop:Workshop,config:StorageConfig,targ
   return (legacyNamespace||managedNamespace)&&invite?.url===`${target.towerUrl}/api/v4/flightdeck-pg/workspaces/${target.workspaceId}/invites`&&invite.payload===JSON.stringify({invitee_npub:config.appNpub,role:'guest',kind:'app',display_name:'BYO Freedom private storage'});
  });
 }
+
+async function relaySetupOperation(workshop:Workshop,event:any,url:string,data:any,errorMessage:string){
+ const payload=JSON.stringify(data),prior=workshop.db.query('SELECT * FROM tower_setup_operations WHERE event_id=?').get(event.id) as any;
+ if(prior){demand(prior.url===url&&prior.payload===payload,409,'Tower authorization replay conflict');return JSON.parse(prior.result_json);}
+ const response=await fetch(url,{method:'POST',headers:{authorization:'Nostr '+Buffer.from(JSON.stringify(event)).toString('base64'),'content-type':'application/json'},body:payload,redirect:'error',signal:AbortSignal.timeout(15000)});
+ demand(response.ok,response.status,errorMessage);const result=await response.json();
+ workshop.db.run('INSERT OR IGNORE INTO tower_setup_operations VALUES(?,?,?,?)',[event.id,url,payload,JSON.stringify(result)]);return result;
+}
+
+async function authorizeDatasetBinding(workshop:Workshop,config:StorageConfig,member:Member,workspace:{workspaceId:string;workspaceOwnerNpub:string},body:any,env=process.env){
+ const appNpub=canvasDatasetNpub(env),target=storageTarget({towerUrl:config.towerOrigin,...workspace,appNpub});
+ const prior=workshop.db.query('SELECT * FROM canvas_dataset_bindings WHERE workshop_id=?').get(workshop.id) as any;
+ if(prior){
+  const saved=storageTarget(JSON.parse(prior.target_json));demand(prior.installation_id===config.installationId&&JSON.stringify(saved)===JSON.stringify(target),409,'Canvas dataset target is already bound; it cannot be rewritten silently');
+  if(prior.status==='ready'&&canvasBrokerBindingStatus({installationId:config.installationId,target,canvasId:workshop.id,user:member.pubkey},env).code==='exact_match')return;
+ }
+ const namespace={app_npub:appNpub,app_name:'BYO Freedom datasets',capabilities:['wapp','app-db'],enabled:true};
+ const invite={invitee_npub:appNpub,role:'guest',kind:'app',display_name:'BYO Freedom Canvas datasets'};
+ const namespaceUrl=`${target.towerUrl}/api/v4/workspaces/${target.workspaceOwnerNpub}/apps`,inviteUrl=`${target.towerUrl}/api/v4/flightdeck-pg/workspaces/${target.workspaceId}/invites`;
+ verifyForwarded(body.datasetNamespaceEvent,member.pubkey,namespaceUrl,'POST',JSON.stringify(namespace));
+ verifyForwarded(body.datasetInviteEvent,member.pubkey,inviteUrl,'POST',JSON.stringify(invite));
+ await relaySetupOperation(workshop,body.datasetNamespaceEvent,namespaceUrl,namespace,'Tower owner authorization is required for the Canvas dataset namespace');
+ const granted=await relaySetupOperation(workshop,body.datasetInviteEvent,inviteUrl,invite,'Tower workspace authority was not granted to the Canvas dataset identity');
+ demand(granted.identity?.workspace_owner_npub===target.workspaceOwnerNpub&&(!granted.identity?.workspace_id||granted.identity.workspace_id===target.workspaceId),409,'Dataset workspace owner binding mismatch');
+ workshop.db.run(`INSERT INTO canvas_dataset_bindings(workshop_id,installation_id,target_json,status,connected_actor,namespace_event,invite_event,error) VALUES(?,?,?,?,?,?,?,NULL)
+  ON CONFLICT(workshop_id) DO UPDATE SET status=excluded.status,connected_actor=excluded.connected_actor,namespace_event=excluded.namespace_event,invite_event=excluded.invite_event,error=NULL`,[workshop.id,config.installationId,JSON.stringify(target),'proving',member.pubkey,body.datasetNamespaceEvent.id,body.datasetInviteEvent.id]);
+ try{
+  const scope={installationId:config.installationId,target,canvasId:workshop.id,user:member.pubkey},direct=canvasTransport(scope,undefined,env);
+  const bounded:StorageTransport=async(url,method,payload)=>{const response=await direct(url,method,payload),reader=response.body?.getReader(),chunks:Uint8Array[]=[];let bytes=0;if(reader)while(true){const next=await reader.read();if(next.done)break;bytes+=next.value.byteLength;if(bytes>9*1024*1024){await reader.cancel();demand(false,502,'Tower dataset response exceeds bounded capacity');}chunks.push(next.value);}return new Response(Buffer.concat(chunks),{status:response.status,headers:response.headers});};
+  const proof=await new CanvasDatasetStore(scope,bounded).prove();
+  const evidence={descriptor:{conditionalUpdate:proof.descriptor.capabilities?.conditional_update===true},migrationsSha256:sha256(JSON.stringify(proof.migrations)),datasetCount:proof.datasets.length,verifiedAt:new Date().toISOString()};
+  workshop.db.run("UPDATE canvas_dataset_bindings SET status='ready',proof_json=?,error=NULL,verified_at=? WHERE workshop_id=?",[JSON.stringify(evidence),now(),workshop.id]);
+ }catch(error){workshop.db.run("UPDATE canvas_dataset_bindings SET status='needs_authorization',error=? WHERE workshop_id=?",[String(error instanceof Error?error.message:error).slice(0,4000),workshop.id]);throw error;}
+}
 export async function towerSetup(workshop:Workshop,config:StorageConfig,member:Member,body:any){
  const db=workshop.db,base=config.towerOrigin;
  if(body.operation==='create'){return createTowerWorkspace(workshop,config,member,body);}
@@ -187,6 +243,8 @@ export async function towerSetup(workshop:Workshop,config:StorageConfig,member:M
  demand(body.localRoot===config.localRoot&&resolve(body.localRoot)===body.localRoot,400,'Local root must match the installation-configured absolute Napplet root');ensureBuilderDirectory(body.localRoot);
  const previous=storageBinding(workshop,config);
  demand(!previous||JSON.stringify(previous.target)===JSON.stringify(target),409,'Storage target is already bound; migrate existing remote versions before changing workspace');
+ const datasetWorkspace={workspaceId:target.workspaceId,workspaceOwnerNpub:target.workspaceOwnerNpub};
+ if(previous?.status==='ready'&&previous.namespace_json){await authorizeDatasetBinding(workshop,config,member,datasetWorkspace,body);return storageStatus(workshop,config);}
 
  const reuse=body.reuse?reusableStorageGrant(workshop,config,target,member.pubkey):null;
  if(body.reuse)demand(reuse,409,'This exact connection needs authorization. Review and sign access again.');
@@ -213,20 +271,14 @@ export async function towerSetup(workshop:Workshop,config:StorageConfig,member:M
  demand(!db.query("SELECT r.id FROM requests r JOIN projects p ON p.id=r.project_id WHERE p.workshop_id=? AND r.status IN ('dispatching','building','storage_pending','execution_uncertain') LIMIT 1").get(workshop.id),409,'A workshop build is active or uncertain; reconcile it before reconnecting storage');
  // Persist exact successful native operations, not short-lived NIP-98 credentials.
  // A replay may reconcile that operation but cannot change its destination/payload.
- const relay=async(event:any,url:string,data:any)=>{
-  const payload=JSON.stringify(data),prior=db.query('SELECT * FROM tower_setup_operations WHERE event_id=?').get(event.id) as any;
-  if(prior){demand(prior.url===url&&prior.payload===payload,409,'Tower authorization replay conflict');return JSON.parse(prior.result_json);}
-  const response=await fetch(url,{method:'POST',headers:{authorization:'Nostr '+Buffer.from(JSON.stringify(event)).toString('base64'),'content-type':'application/json'},body:payload,redirect:'error',signal:AbortSignal.timeout(15000)});
-  demand(response.ok,response.status,url===namespaceUrl?'Tower owner authorization is required for BYO Freedom app namespace':'Tower workspace storage authority was not granted');
-  const result=await response.json();db.run('INSERT OR IGNORE INTO tower_setup_operations VALUES(?,?,?,?)',[event.id,url,payload,JSON.stringify(result)]);return result;
- };
  const established=(db.query('SELECT target_json,status,namespace_json FROM storage_binding UNION ALL SELECT target_json,status,namespace_json FROM workshop_storage_bindings').all() as any[]).filter(row=>{if(row.status!=='ready'||!row.namespace_json)return false;const t=storageTarget(JSON.parse(row.target_json)),n=JSON.parse(row.namespace_json);return t.towerUrl===target.towerUrl&&t.appNpub===target.appNpub&&t.workspaceOwnerNpub===target.workspaceOwnerNpub&&n.workspace_owner_npub===target.workspaceOwnerNpub&&n.app_npub===target.appNpub;});
- if(body.namespaceEvent&&(body.reconnect||!established.length))await relay(body.namespaceEvent,namespaceUrl,namespaceData);
+ if(body.namespaceEvent&&(body.reconnect||!established.length))await relaySetupOperation(workshop,body.namespaceEvent,namespaceUrl,namespaceData,'Tower owner authorization is required for BYO Freedom app namespace');
  if(!body.namespaceEvent)db.run('INSERT OR IGNORE INTO tower_setup_operations VALUES(?,?,?,?)',[namespaceEventId,`managed-wapp-installation:${config.installationId}`,JSON.stringify(target),JSON.stringify({binding:managedBinding})]);
- const granted=await relay(body.event,url,data);
+ const granted=await relaySetupOperation(workshop,body.event,url,data,'Tower workspace storage authority was not granted');
  demand(granted.identity?.workspace_owner_npub===target.workspaceOwnerNpub&&(!granted.identity?.workspace_id||granted.identity.workspace_id===target.workspaceId),409,'Workspace owner binding mismatch');
  db.run('INSERT INTO tower_storage_grants VALUES(?,?,?,?,?,?,?) ON CONFLICT(workshop_id) DO UPDATE SET actor=excluded.actor,namespace_event=excluded.namespace_event,invite_event=excluded.invite_event,authorized_at=excluded.authorized_at',[workshop.id,config.installationId,JSON.stringify(target),member.pubkey,namespaceEventId,body.event.id,now()]);
  }
+ await authorizeDatasetBinding(workshop,config,member,datasetWorkspace,body);
  const id=createStorageJob(workshop,'probe',target,`byo-storage-probe-${config.installationId}.html`,Buffer.from('<!doctype html><html><body>Private BYO Freedom storage readiness probe</body></html>'));
  if(workshop.legacy)db.run('INSERT INTO storage_binding(id,installation_id,workshop_id,target_json,local_root,status,probe_job_id,connected_actor) VALUES(1,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,probe_job_id=excluded.probe_job_id',[config.installationId,config.workshopId,JSON.stringify(target),config.localRoot,'probing',id,member.pubkey]);
  else db.run('INSERT INTO workshop_storage_bindings(workshop_id,installation_id,target_json,local_root,status,probe_job_id,connected_actor) VALUES(?,?,?,?,?,?,?) ON CONFLICT(workshop_id) DO UPDATE SET status=excluded.status,probe_job_id=excluded.probe_job_id',[config.workshopId,config.installationId,JSON.stringify(target),config.localRoot,'probing',id,member.pubkey]);

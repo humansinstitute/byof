@@ -37,13 +37,19 @@ drift. It remains a pinned pipeline caller, not an HTTP proxy or signing endpoin
 
 Canvas datasets use a separate backend-only `BYO_NSEC` on CapRover. It is not the
 managed-pipeline credential and must not replace or be included in pipeline
-configuration. Freedom Tools derives its npub at runtime and permits direct Tower
-app-database requests only when that identity exactly equals the saved Canvas target
-`appNpub`. Each descriptor, migration, query, create or conditional-update request
+configuration. Freedom Tools derives its dataset npub at runtime, keeps the managed
+publication/private-file identity unchanged, and saves a separate per-Canvas dataset
+target only after the administrator reviews the exact Tower namespace and workspace-
+guest operations for that dataset npub. Each descriptor, migration, query, create or conditional-update request
 gets a fresh NIP-98 signature over the exact HTTPS URL, method and JSON payload hash,
 with a short deadline and redirects disabled. Keep `BYO_NSEC` out of source, browser
 responses, logs and deployment evidence. Managed/local deployments continue to use
 the explicit loopback database-broker capability when present.
+
+Older Canvases with only the publication/storage binding remain usable for their
+existing artifacts but show **Complete setup** until the dataset identity has been
+authorized and real descriptor, migration and query proof has been stored. Never
+rewrite the existing storage target to repair dataset access.
 
 Configure installation-wide storage only after the remote grant is active. Its
 storage template must use the same installation app identity in Autopilot custody,

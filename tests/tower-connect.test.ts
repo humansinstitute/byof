@@ -1,6 +1,6 @@
 import { test,expect } from 'bun:test';
 import { mkdtempSync,rmSync,writeFileSync } from 'node:fs';
-import { generateSecretKey,getPublicKey,nip19,finalizeEvent } from 'nostr-tools';
+import { generateSecretKey,getPublicKey,nip19,finalizeEvent,verifyEvent } from 'nostr-tools';
 import { application } from '../src/application.ts';
 import { TowerConnect } from '../src/tower-connect.ts';
 import { sha256 } from '../src/assets.ts';
@@ -8,15 +8,21 @@ import { Workshop } from '../src/workshop.ts';
 import { storageStatus,updateStorageJob,storeStorageDelivery } from '../src/storage.ts';
 const towerOrigin='https://tower.example',origin='https://byo.example';
 function fixture(){
- const dir=mkdtempSync('/private/tmp/byo-connect-'),key=generateSecretKey(),actor=getPublicKey(key),appKey=generateSecretKey();
+ const dir=mkdtempSync('/private/tmp/byo-connect-'),key=generateSecretKey(),actor=getPublicKey(key),appKey=generateSecretKey(),datasetKey=generateSecretKey(),priorNsec=process.env.BYO_NSEC;
+ process.env.BYO_NSEC=nip19.nsecEncode(datasetKey);const datasetAppNpub=nip19.npubEncode(getPublicKey(datasetKey));
  const credential=dir+'/capability';writeFileSync(credential,'a'.repeat(43),{mode:0o600});
  const template:any={installationId:crypto.randomUUID(),appPubkey:getPublicKey(appKey),appNpub:nip19.npubEncode(getPublicKey(appKey)),towerOrigin,localRoot:dir,workshopId:crypto.randomUUID(),pipeline:{brokerUrl:'http://127.0.0.1/api/internal/wapps/pipelines',credentialFile:credential,origin:'https://autopilot.example',definitionId:'storage',callbackUrl:origin+'/api/v1/storage/callback',appPubkey:getPublicKey(appKey)}};
  const config:any={dataDir:dir,hostPubkey:actor,origin,version:'test',storageTemplates:[template]};const app=application(config);
  app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[actor,'Admin','extension','admitted',20,1]);const member=app.auth.member(actor);
  const tower=app.site.register(member,{label:'Tower',origin:towerOrigin})[0],workshop=app.site.create(member,{title:'Workshop',towerId:tower.id})!;
  const connect=new TowerConnect(app.site,app.workshop.assets),sign=(url:string,method:string,payload?:any)=>finalizeEvent({kind:27235,created_at:Math.floor(Date.now()/1000),content:'',tags:[['u',url],['method',method],...(payload===undefined?[]:[['payload',sha256(JSON.stringify(payload))]])]},key);
- return {dir,key,appKey,config,app,member,tower,workshop,connect,sign,template,close(){app.db.close();rmSync(dir,{recursive:true,force:true});key.fill(0);appKey.fill(0);}};
+ const datasetAuthorization=(workspaceId:string,owner:string,signer=sign)=>({
+  datasetNamespaceEvent:signer(`${towerOrigin}/api/v4/workspaces/${owner}/apps`,'POST',{app_npub:datasetAppNpub,app_name:'BYO Freedom datasets',capabilities:['wapp','app-db'],enabled:true}),
+  datasetInviteEvent:signer(`${towerOrigin}/api/v4/flightdeck-pg/workspaces/${workspaceId}/invites`,'POST',{invitee_npub:datasetAppNpub,role:'guest',kind:'app',display_name:'BYO Freedom Canvas datasets'})
+ });
+ return {dir,key,appKey,datasetKey,datasetAppNpub,datasetAuthorization,config,app,member,tower,workshop,connect,sign,template,close(){app.db.close();rmSync(dir,{recursive:true,force:true});key.fill(0);appKey.fill(0);datasetKey.fill(0);priorNsec===undefined?delete process.env.BYO_NSEC:process.env.BYO_NSEC=priorNsec;}};
 }
+function datasetProof(url:string){if(url.endsWith('/descriptor'))return Response.json({capabilities:{conditional_update:true}});if(url.endsWith('/migrations'))return Response.json({applied:true});if(url.endsWith('/tables/canvas_dataset_records/query'))return Response.json({rows:[]});}
 test('direct admin creation pins signer/app/Tower and intent; retries do not create duplicates or silently bind',async()=>{
  const f=fixture(),saved=globalThis.fetch;try{
  const body={workspaceName:'Workspace',idempotencyKey:crypto.randomUUID()},prepared=f.connect.intent(f.member,f.tower.id,f.workshop.id,body);expect(prepared.url).toBe(towerOrigin+'/api/v4/admin/flightdeck-pg/workspaces');expect(prepared.payload.app_npub).toBe(f.template.appNpub);expect(prepared.payload.creator_npub).toBe(nip19.npubEncode(f.member.pubkey));
@@ -33,14 +39,14 @@ test('selection automatically registers app, grants guest, starts one scoped job
  const f=fixture(),saved=globalThis.fetch;try{
  const workspaceId=crypto.randomUUID(),owner=nip19.npubEncode(f.member.pubkey),entry={label:'Workspace',identity:{workspace_id:workspaceId,workspace_owner_npub:owner}},requests:string[]=[],runId=crypto.randomUUID();let failRegistration=true;
  globalThis.fetch=(async(url:any,init:any)=>{
-  requests.push(url);if(url.endsWith('/workspaces'))return Response.json({workspaces:[entry]});
+  requests.push(url);const proof=datasetProof(String(url));if(proof)return proof;if(url.endsWith('/workspaces'))return Response.json({workspaces:[entry]});
   if(url.endsWith('/apps'))return failRegistration?Response.json({error:'denied'},{status:403}):Response.json({});
   if(url.endsWith('/invites'))return Response.json({identity:{workspace_owner_npub:owner}});
   expect(url).toBe(f.template.pipeline.brokerUrl);const request=JSON.parse(init.body),bodyHash=sha256(request.serializedBody),signedUrl=f.template.pipeline.origin+request.path,event=finalizeEvent({kind:27235,created_at:Math.floor(Date.now()/1000),content:'',tags:[['u',signedUrl],['method',request.method],['payload',bodyHash]]},f.appKey);
   return Response.json({response:{runId},httpStatus:200,receipt:{url:signedUrl,method:request.method,bodyHash,event}});
  }) as any;
  await f.connect.connect(f.member,f.tower.id,f.workshop.id,{event:f.sign(towerOrigin+'/api/v4/flightdeck-pg/workspaces','GET')});
- const body={workspaceId,event:f.sign(`${towerOrigin}/api/v4/flightdeck-pg/workspaces/${workspaceId}/invites`,'POST',{invitee_npub:f.template.appNpub,role:'guest',kind:'app',display_name:'BYO Freedom private storage'}),namespaceEvent:f.sign(`${towerOrigin}/api/v4/workspaces/${owner}/apps`,'POST',{app_npub:f.template.appNpub,app_name:'BYO Freedom',capabilities:['wapp','app-db'],enabled:true})};
+ const body={workspaceId,event:f.sign(`${towerOrigin}/api/v4/flightdeck-pg/workspaces/${workspaceId}/invites`,'POST',{invitee_npub:f.template.appNpub,role:'guest',kind:'app',display_name:'BYO Freedom private storage'}),namespaceEvent:f.sign(`${towerOrigin}/api/v4/workspaces/${owner}/apps`,'POST',{app_npub:f.template.appNpub,app_name:'BYO Freedom',capabilities:['wapp','app-db'],enabled:true}),...f.datasetAuthorization(workspaceId,owner)};
  await expect(f.connect.bind(f.member,f.tower.id,f.workshop.id,body)).rejects.toThrow('namespace');expect(f.app.db.query('SELECT * FROM storage_jobs').all()).toHaveLength(0);failRegistration=false;
  const state=await f.connect.bind(f.member,f.tower.id,f.workshop.id,body);expect(state.binding.status).toBe('probing');expect(state.namespaceReady).toBe(false);
  const cfg=f.app.site.storage(f.workshop.id)!,w=new Workshop(f.app.db,f.app.workshop.assets,f.workshop.id),job:any=f.app.db.query('SELECT * FROM storage_jobs').get(),target=JSON.parse(job.target_json),objectId=crypto.randomUUID();
@@ -49,7 +55,7 @@ test('selection automatically registers app, grants guest, starts one scoped job
  const artifact={objectId,workspaceId,towerUrl:towerOrigin,contentUrl:towerOrigin+'/api/v4/storage/'+objectId+'/content',sha256:job.sha256,sizeBytes:job.size_bytes,isPublic:false};
  updateStorageJob(w,cfg,job.id,{step:'verified',artifact,base64:job.base64});expect(storageStatus(w,cfg).binding.status).toBe('probing');
  storeStorageDelivery(w,cfg,{eventId:crypto.randomUUID(),bodyHash:'verified-delivery',attempt:1,envelope:{deliveryId:crypto.randomUUID(),runId,terminal:true,status:'ok',error:null,result:{jobId:job.id,remoteStorage:artifact}}});expect(storageStatus(w,cfg).binding.status).toBe('ready');
- f.app.db.run('UPDATE storage_jobs SET run_id=NULL WHERE id=?',[job.id]);await f.connect.bind(f.member,f.tower.id,f.workshop.id,body);expect(f.app.db.query('SELECT * FROM storage_jobs').all()).toHaveLength(1);expect(requests.filter(x=>x.endsWith('/invites'))).toHaveLength(1);
+ f.app.db.run('UPDATE storage_jobs SET run_id=NULL WHERE id=?',[job.id]);await f.connect.bind(f.member,f.tower.id,f.workshop.id,body);expect(f.app.db.query('SELECT * FROM storage_jobs').all()).toHaveLength(1);expect(requests.filter(x=>x.endsWith('/invites'))).toHaveLength(2);
  const other=crypto.randomUUID();f.app.db.run('UPDATE storage_connections SET workspaces_json=? WHERE actor=?',[JSON.stringify([entry,{identity:{workspace_id:other,workspace_owner_npub:owner}}]),f.member.pubkey]);await expect(f.connect.bind(f.member,f.tower.id,f.workshop.id,{...body,workspaceId:other})).rejects.toThrow('already bound');
  const second=f.app.site.create(f.member,{title:'Second',towerId:f.tower.id})!;expect(f.app.site.storage(second.id)?.workshopId).toBe(second.id);expect(f.app.site.storage(second.id)?.pipeline).toEqual(cfg.pipeline);f.config.storageTemplates[0]={...f.template,pipeline:{...f.template.pipeline,definitionId:'newer-connector'}};expect(f.app.site.storage(second.id)?.pipeline.definitionId).toBe(cfg.pipeline.definitionId);expect(target.workspaceId).toBe(workspaceId);
  const beforeGrants=requests.filter(x=>x.endsWith('/invites')||x.endsWith('/apps')).length;failRegistration=true;
@@ -60,23 +66,26 @@ test('selection automatically registers app, grants guest, starts one scoped job
  expect(()=>f.app.site.storage(crypto.randomUUID())).not.toThrow();
  }finally{globalThis.fetch=saved;f.close();}
 });
-test('exact managed WApp binding reuses its installed namespace and only asks the user for the workspace invite',async()=>{
+test('exact managed WApp binding preserves storage authority and separately reviews dataset namespace and guest access',async()=>{
  const f=fixture(),saved=globalThis.fetch,prior={WAPP_TOWER_DB_BROKER_URL:process.env.WAPP_TOWER_DB_BROKER_URL,WAPP_TOWER_DB_CAPABILITY:process.env.WAPP_TOWER_DB_CAPABILITY,WAPP_INSTALLATION_ID:process.env.WAPP_INSTALLATION_ID,WAPP_TOWER_URL:process.env.WAPP_TOWER_URL,WAPP_TOWER_WORKSPACE_ID:process.env.WAPP_TOWER_WORKSPACE_ID,WAPP_TOWER_WORKSPACE_OWNER_NPUB:process.env.WAPP_TOWER_WORKSPACE_OWNER_NPUB,WAPP_APP_NPUB:process.env.WAPP_APP_NPUB};
  try{
   const workspaceId=crypto.randomUUID(),owner=nip19.npubEncode(f.member.pubkey),requests:string[]=[];
   Object.assign(process.env,{WAPP_TOWER_DB_BROKER_URL:'http://127.0.0.1:1/api/internal/wapps/tower-db',WAPP_TOWER_DB_CAPABILITY:'runtime',WAPP_INSTALLATION_ID:f.template.installationId,WAPP_TOWER_URL:towerOrigin,WAPP_TOWER_WORKSPACE_ID:workspaceId,WAPP_TOWER_WORKSPACE_OWNER_NPUB:owner,WAPP_APP_NPUB:f.template.appNpub});
   globalThis.fetch=(async(url:any,init:any)=>{
    requests.push(String(url));
+   if(String(url)===process.env.WAPP_TOWER_DB_BROKER_URL){const request=JSON.parse(init.body);if(request.path==='/descriptor')return Response.json({capabilities:{conditional_update:true}});if(request.path==='/migrations')return Response.json({applied:true});return Response.json({rows:[]});}
    if(String(url).endsWith('/workspaces'))return Response.json({workspaces:[{label:'Managed workspace',identity:{workspace_id:workspaceId,workspace_owner_npub:owner}}]});
    if(String(url).endsWith('/invites'))return Response.json({identity:{workspace_id:workspaceId,workspace_owner_npub:owner}});
-   expect(String(url)).not.toEndWith('/apps');expect(String(url)).toBe(f.template.pipeline.brokerUrl);
+   if(String(url).endsWith('/apps'))return Response.json({});
+   expect(String(url)).toBe(f.template.pipeline.brokerUrl);
    const request=JSON.parse(init.body),bodyHash=sha256(request.serializedBody),signedUrl=f.template.pipeline.origin+request.path,event=finalizeEvent({kind:27235,created_at:Math.floor(Date.now()/1000),content:'',tags:[['u',signedUrl],['method',request.method],['payload',bodyHash]]},f.appKey);
    return Response.json({response:{runId:crypto.randomUUID()},httpStatus:200,receipt:{url:signedUrl,method:request.method,bodyHash,event}});
   }) as any;
   await f.connect.connect(f.member,f.tower.id,f.workshop.id,{event:f.sign(towerOrigin+'/api/v4/flightdeck-pg/workspaces','GET')});
   const invite={invitee_npub:f.template.appNpub,role:'guest',kind:'app',display_name:'BYO Freedom private storage'},event=f.sign(`${towerOrigin}/api/v4/flightdeck-pg/workspaces/${workspaceId}/invites`,'POST',invite);
-  const state=await f.connect.bind(f.member,f.tower.id,f.workshop.id,{workspaceId,event,reconnect:true});expect(state.state).toBe('probing');
-  expect(requests.filter(url=>url.endsWith('/invites'))).toHaveLength(1);expect(requests.some(url=>url.endsWith('/apps'))).toBe(false);
+  const datasetNamespace={app_npub:f.template.appNpub,app_name:'BYO Freedom datasets',capabilities:['wapp','app-db'],enabled:true},datasetInvite={invitee_npub:f.template.appNpub,role:'guest',kind:'app',display_name:'BYO Freedom Canvas datasets'};
+  const state=await f.connect.bind(f.member,f.tower.id,f.workshop.id,{workspaceId,event,reconnect:true,datasetNamespaceEvent:f.sign(`${towerOrigin}/api/v4/workspaces/${owner}/apps`,'POST',datasetNamespace),datasetInviteEvent:f.sign(`${towerOrigin}/api/v4/flightdeck-pg/workspaces/${workspaceId}/invites`,'POST',datasetInvite)});expect(state.state).toBe('probing');
+  expect(requests.filter(url=>url.endsWith('/invites'))).toHaveLength(2);expect(requests.filter(url=>url.endsWith('/apps'))).toHaveLength(1);
   const grant=f.app.db.query('SELECT * FROM tower_storage_grants WHERE workshop_id=?').get(f.workshop.id) as any,proof=f.app.db.query('SELECT * FROM tower_setup_operations WHERE event_id=?').get(grant.namespace_event) as any;
   expect(grant.namespace_event).toMatch(/^[a-f0-9]{64}$/);expect(proof.url).toBe(`managed-wapp-installation:${f.template.installationId}`);expect(JSON.parse(proof.payload)).toMatchObject({towerUrl:towerOrigin,workspaceId,workspaceOwnerNpub:owner,appNpub:f.template.appNpub});
  }finally{
@@ -120,9 +129,9 @@ test('installation-wide connector onboards selected Nstack without per-Tower tem
  const f=fixture(),saved=globalThis.fetch;try{
  f.config.storageTemplates=[];f.config.managedStorage=f.template;
  const nstack='https://nstack.otherstuff.ai',tower=f.app.site.register(f.member,{label:'Nstack',origin:nstack}).find(t=>t.origin===nstack)!;
- const workshop=f.app.site.create(f.member,{title:'Nstack workshop',towerId:tower.id})!,workspaceId=crypto.randomUUID(),owner=nip19.npubEncode(f.member.pubkey),runId=crypto.randomUUID();let grants=0;
+ const workshop=f.app.site.create(f.member,{title:'Nstack workshop',towerId:tower.id})!,workspaceId=crypto.randomUUID(),owner=nip19.npubEncode(f.member.pubkey),runId=crypto.randomUUID(),datasetCalls:string[]=[];let grants=0;
  globalThis.fetch=(async(url:any,init:any)=>{
-  if(url===nstack+'/api/v4/flightdeck-pg/workspaces')return Response.json({workspaces:[{label:'Selected workspace',identity:{workspace_id:workspaceId,workspace_owner_npub:owner}}]});
+  const proof=datasetProof(String(url));if(proof){const event=JSON.parse(Buffer.from(String(init.headers.authorization).replace(/^Nostr /,''),'base64').toString());expect(verifyEvent(event)).toBe(true);expect(event.pubkey).toBe(getPublicKey(f.datasetKey));expect(event.pubkey).not.toBe(cfg?.appPubkey);expect(event.tags).toContainEqual(['u',String(url)]);expect(event.tags).toContainEqual(['method',String(init.method)]);datasetCalls.push(new URL(String(url)).pathname);return proof;}if(url===nstack+'/api/v4/flightdeck-pg/workspaces')return Response.json({workspaces:[{label:'Selected workspace',identity:{workspace_id:workspaceId,workspace_owner_npub:owner}}]});
   if(url.startsWith(nstack)&&url.endsWith('/apps')){grants++;return Response.json({});}
   if(url.startsWith(nstack)&&url.endsWith('/invites')){grants++;return Response.json({identity:{workspace_id:workspaceId,workspace_owner_npub:owner}});}
   expect(url).toBe(f.template.pipeline.brokerUrl);const b=JSON.parse(init.body),bodyHash=sha256(b.serializedBody),signedUrl=f.template.pipeline.origin+b.path,event=finalizeEvent({kind:27235,created_at:Math.floor(Date.now()/1000),content:'',tags:[['u',signedUrl],['method',b.method],['payload',bodyHash]]},f.appKey);
@@ -130,16 +139,17 @@ test('installation-wide connector onboards selected Nstack without per-Tower tem
  }) as any;
  const connected:any=await f.connect.connect(f.member,tower.id,workshop.id,{event:f.sign(nstack+'/api/v4/flightdeck-pg/workspaces','GET')});expect(connected.storage.state).toBe('needs_authorization');expect(connected.storage.towerOrigin).toBe(nstack);
  const cfg=f.app.site.storage(workshop.id)!,w=new Workshop(f.app.db,f.app.workshop.assets,workshop.id);
- const body={workspaceId,reconnect:true,event:f.sign(`${nstack}/api/v4/flightdeck-pg/workspaces/${workspaceId}/invites`,'POST',{invitee_npub:cfg.appNpub,role:'guest',kind:'app',display_name:'BYO Freedom private storage'}),namespaceEvent:f.sign(`${nstack}/api/v4/workspaces/${owner}/apps`,'POST',{app_npub:cfg.appNpub,app_name:'BYO Freedom',capabilities:['wapp','app-db'],enabled:true})};
+ const datasetAuthorization={datasetNamespaceEvent:f.sign(`${nstack}/api/v4/workspaces/${owner}/apps`,'POST',{app_npub:f.datasetAppNpub,app_name:'BYO Freedom datasets',capabilities:['wapp','app-db'],enabled:true}),datasetInviteEvent:f.sign(`${nstack}/api/v4/flightdeck-pg/workspaces/${workspaceId}/invites`,'POST',{invitee_npub:f.datasetAppNpub,role:'guest',kind:'app',display_name:'BYO Freedom Canvas datasets'})};
+ const body={workspaceId,reconnect:true,event:f.sign(`${nstack}/api/v4/flightdeck-pg/workspaces/${workspaceId}/invites`,'POST',{invitee_npub:cfg.appNpub,role:'guest',kind:'app',display_name:'BYO Freedom private storage'}),namespaceEvent:f.sign(`${nstack}/api/v4/workspaces/${owner}/apps`,'POST',{app_npub:cfg.appNpub,app_name:'BYO Freedom',capabilities:['wapp','app-db'],enabled:true}),...datasetAuthorization};
  await expect(f.connect.bind(f.member,tower.id,workshop.id,{...body,workspaceId:crypto.randomUUID()})).rejects.toThrow('authorized Tower list');
- const before=f.app.db.query('SELECT current_revision FROM projects').all();const state=await f.connect.bind(f.member,tower.id,workshop.id,body);expect(state.state).toBe('probing');expect(grants).toBe(2);
+ const before=f.app.db.query('SELECT current_revision FROM projects').all();const state=await f.connect.bind(f.member,tower.id,workshop.id,body);expect(state.state).toBe('probing');expect(grants).toBe(4);expect(state.dataset.target.appNpub).toBe(f.datasetAppNpub);expect(state.binding.target.appNpub).toBe(cfg.appNpub);expect(state.datasetDiscovery.code).toBe('exact_match');expect(state.dataset.proof.datasetCount).toBe(0);expect(datasetCalls.map(path=>path.slice(path.indexOf('/db')+3))).toEqual(['/descriptor','/migrations','/tables/canvas_dataset_records/query']);
  const {getStorageJob}=await import('../src/storage.ts');const job=getStorageJob(w,cfg,state.probe.id);expect(job.destinationGrant).toMatchObject({installationId:cfg.installationId,workshopId:workshop.id,target:{towerUrl:nstack,workspaceId,appNpub:cfg.appNpub},inviteEventId:body.event.id,namespaceEventId:body.namespaceEvent.id});
  expect(f.app.db.query('SELECT current_revision FROM projects').all()).toEqual(before);
  const oid=crypto.randomUUID(),row=f.app.db.query('SELECT * FROM storage_jobs WHERE id=?').get(job.jobId) as any;
  updateStorageJob(w,cfg,job.jobId,{step:'namespace',namespace:{workspace_owner_npub:owner,app_npub:cfg.appNpub,schema_name:'wapp_byo_freedom_abcd'}});updateStorageJob(w,cfg,job.jobId,{step:'preparing'});updateStorageJob(w,cfg,job.jobId,{step:'prepared',objectId:oid});
  const artifact={objectId:oid,workspaceId,towerUrl:nstack,contentUrl:nstack+'/api/v4/storage/'+oid+'/content',sha256:job.sha256,sizeBytes:job.sizeBytes,isPublic:false};updateStorageJob(w,cfg,job.jobId,{step:'verified',artifact,base64:row.base64});
  expect(storageStatus(w,cfg).state).toBe('probing');storeStorageDelivery(w,cfg,{eventId:crypto.randomUUID(),bodyHash:'nstack',attempt:1,envelope:{deliveryId:crypto.randomUUID(),runId,terminal:true,status:'ok',error:null,result:{jobId:job.jobId,remoteStorage:artifact}}});expect(storageStatus(w,cfg).state).toBe('ready');
- await f.connect.bind(f.member,tower.id,workshop.id,body);expect(grants).toBe(2);expect(f.app.db.query('SELECT id FROM storage_jobs WHERE workshop_id=?').all(workshop.id)).toHaveLength(1);
+ await f.connect.bind(f.member,tower.id,workshop.id,body);expect(grants).toBe(4);expect(f.app.db.query('SELECT id FROM storage_jobs WHERE workshop_id=?').all(workshop.id)).toHaveLength(1);
  updateStorageJob(w,cfg,job.jobId,{step:'failed',error:'tower_storage_read_http_403'});expect(storageStatus(w,cfg).state).toBe('error');expect(storageStatus(w,cfg).binding.status).toBe('needs_authorization');
  expect(storageStatus(w,cfg).binding.target.workspaceId).toBe(workspaceId);expect(f.app.db.query('SELECT current_revision FROM projects').all()).toEqual(before);
  }finally{globalThis.fetch=saved;f.close();}
@@ -184,13 +194,14 @@ test('connection reuse requires current workspace access and exact durable app e
   expect(reusableStorageGrant(w,cfg,target,actorB)).toBeDefined();
   const second=f.app.site.create(memberB,{title:'Reuse',towerId:f.tower.id})!,calls:string[]=[];
   globalThis.fetch=(async(url:any,init:any)=>{
-   calls.push(url);if(url===towerOrigin+'/api/v4/flightdeck-pg/workspaces')return Response.json({workspaces:[{label:'Exact workspace',identity:{workspace_id:workspaceId,workspace_owner_npub:owner}}]});
+   calls.push(url);const proof=datasetProof(String(url));if(proof)return proof;if(url===towerOrigin+'/api/v4/flightdeck-pg/workspaces')return Response.json({workspaces:[{label:'Exact workspace',identity:{workspace_id:workspaceId,workspace_owner_npub:owner}}]});
+   if(url===nsUrl)return Response.json({});if(url===inviteUrl)return Response.json({identity:{workspace_id:workspaceId,workspace_owner_npub:owner}});
    expect(url).toBe(f.template.pipeline.brokerUrl);const request=JSON.parse(init.body),bodyHash=sha256(request.serializedBody),signedUrl=f.template.pipeline.origin+request.path,event=finalizeEvent({kind:27235,created_at:Math.floor(Date.now()/1000),content:'',tags:[['u',signedUrl],['method',request.method],['payload',bodyHash]]},f.appKey);
    return Response.json({response:{runId:crypto.randomUUID()},httpStatus:200,receipt:{url:signedUrl,method:request.method,bodyHash,event}});
   }) as any;
   const result=await f.connect.connect(memberB,f.tower.id,second.id,{event:signB(towerOrigin+'/api/v4/flightdeck-pg/workspaces','GET')});expect(result.reusable).toEqual([workspaceId]);
-  const ready=await f.connect.bind(memberB,f.tower.id,second.id,{workspaceId,reuse:true});expect(ready.state).toBe('probing');expect(ready.binding.target).toEqual(target);expect(ready.namespaceReady).toBe(false);
-  expect(calls.some(url=>url===nsUrl||url===inviteUrl)).toBe(false);expect(f.app.db.query('SELECT id FROM storage_jobs WHERE workshop_id=?').all(second.id)).toHaveLength(1);
+  const ready=await f.connect.bind(memberB,f.tower.id,second.id,{workspaceId,reuse:true,...f.datasetAuthorization(workspaceId,owner,signB)});expect(ready.state).toBe('probing');expect(ready.binding.target).toEqual(target);expect(ready.namespaceReady).toBe(false);expect(ready.dataset.target.appNpub).toBe(f.datasetAppNpub);
+  expect(calls.filter(url=>url===nsUrl||url===inviteUrl)).toHaveLength(2);expect(f.app.db.query('SELECT id FROM storage_jobs WHERE workshop_id=?').all(second.id)).toHaveLength(1);
   expect(f.app.db.query('SELECT actor,namespace_event,invite_event FROM tower_storage_grants WHERE workshop_id=?').get(second.id)).toEqual({actor:actorB,namespace_event:namespaceEvent,invite_event:inviteEvent});
   const cfg2=f.app.site.storage(second.id)!,w2=new Workshop(f.app.db,f.app.workshop.assets,second.id);updateStorageJob(w2,cfg2,ready.probe.id,{step:'failed',error:'tower_storage_http_403'});expect(storageStatus(w2,cfg2).state).toBe('error');
   expect(storageStatus(w,cfg).binding.status).toBe('ready');

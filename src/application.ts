@@ -166,7 +166,7 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport:(sc
       if(path==='/api/v1/profile/nostr'&&method==='POST')return json(saveNostrProfile(db,identity,body));
       if(path==='/api/v1/site/people'&&method==='GET')return json(knownProfiles(db,identity));
       if(path==='/api/v1/profile'&&['GET','POST'].includes(method))return json(site.profile(identity,method==='POST'?body:undefined));
-      if(path==='/api/v1/workshops'&&method==='GET')return json({workshops:site.workshops(identity).map(w=>({...w,...(identity.admin&&w.tower_id?{setupState:storageStatus(new Workshop(db,workshop.assets,w.id),site.storage(w.id)).state}:{})})),legacyWorkshopId:site.legacy()});
+      if(path==='/api/v1/workshops'&&method==='GET')return json({workshops:site.workshops(identity).map(w=>({...w,...(identity.admin&&w.tower_id?{setupState:storageStatus(new Workshop(db,workshop.assets,w.id),site.storage(w.id)).setupState}:{})})),legacyWorkshopId:site.legacy()});
       if(path==='/api/v1/site/workshops'&&method==='POST')return json(site.create(identity,body),201);
       const canvasDelete=path.match(/^\/api\/v1\/workshops\/([a-f0-9-]{36})$/);
       if(canvasDelete&&method==='DELETE')return json(site.deleteCanvas(identity,canvasDelete[1]!,body));

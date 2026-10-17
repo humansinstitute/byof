@@ -257,7 +257,8 @@ consumer's current access, and aborts when its last consumer leaves. A managed
 local deployment uses Autopilot's explicit runtime-only app database broker
 capability. A separate CapRover deployment without that loopback capability uses
 its backend-only `BYO_NSEC` to sign the same exact Tower requests directly with
-NIP-98. The derived signer npub must equal the saved Canvas app identity. Both
+NIP-98. The derived signer npub must equal the separately saved Canvas dataset
+identity; it does not replace the managed publication/private-file app. Both
 transports enforce the same descriptor/migration/query/create/conditional-update
 allowlist, exact destination, 15-second request deadline and no redirects.
 Requests are limited to eight concurrent operations without a waiting queue.
@@ -272,12 +273,13 @@ Private values are excluded. Existing project-private `napplet.storage` data is
 unchanged; copying or sharing it requires an explicit user-directed migration.
 
 Deployment requires either an exact managed WApp Tower DB binding or the direct
-server signer whose derived npub exactly matches the Canvas/storage target. A
+server signer whose derived npub exactly matches the Canvas dataset target. A
 mismatched workspace, Tower or signer fails explicitly; it is never redirected
-and recorded authority is never silently rewritten. Canvas setup registers the
-same stable Freedom Tools app namespace and workspace guest identity through the
-browser-reviewed signatures. Existing Canvases saved under another app identity
-must be explicitly reauthorized. `scripts/canvas-broker-bind.ts` remains the local
+and recorded authority is never silently rewritten. Canvas setup separately displays
+the publication/private-file identity and dataset identity, obtains browser-reviewed
+namespace and workspace-guest signatures for the latter, and persists descriptor,
+migration and query proof. Existing Canvases without that dataset binding expose an
+explicit one-time completion path. `scripts/canvas-broker-bind.ts` remains the local
 managed-binding helper. The corrected CREATE-only migration uses
 `canvas_dataset_records`; historical, unshipped `canvas_data` rows remain untouched
 and are not silently copied or shared.

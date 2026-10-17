@@ -7,7 +7,7 @@ import type { StorageTransport } from './tower-storage-client.ts';
 type RuntimeEnv=Record<string,string|undefined>;
 type Fetcher=(input:any,init?:any)=>Promise<Response>;
 export type CanvasBrokerBindingStatus={
- code:'exact_match'|'managed_binding_mismatch'|'signer_target_mismatch'|'broker_unavailable';
+ code:'exact_match'|'dataset_binding_required'|'managed_binding_mismatch'|'signer_target_mismatch'|'broker_unavailable';
  canvasOrigin:string;
  managedOrigin:string|null;
  message:string;
@@ -16,6 +16,14 @@ export type CanvasBrokerBindingStatus={
 };
 
 function managedBrokerSelected(env:RuntimeEnv){return !!(env.WAPP_TOWER_DB_BROKER_URL||env.WAPP_TOWER_DB_CAPABILITY);}
+
+export function canvasDatasetNpub(env:RuntimeEnv=process.env){
+ if(managedBrokerSelected(env)){
+  demand(env.WAPP_APP_NPUB,503,'Canvas dataset identity is unavailable: the managed app identity is missing');
+  return env.WAPP_APP_NPUB;
+ }
+ return canvasDirectSigner(env).npub;
+}
 
 export function canvasDirectSigner(env:RuntimeEnv=process.env){
  const encoded=env.BYO_NSEC?.trim();

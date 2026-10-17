@@ -4,7 +4,7 @@ import type { Member } from './auth.ts';
 import { demand } from './errors.ts';
 import { CanvasDatasetStore, datasetBinding, type DatasetBinding } from './canvas-datasets.ts';
 import type { StorageConfig } from './storage.ts';
-import { storageStatus } from './storage.ts';
+import { datasetTarget, revokeDatasetBinding, storageStatus } from './storage.ts';
 import type { StorageTransport } from './tower-storage-client.ts';
 import type { NappletData } from './napplet-data.ts';
 import { now } from './auth.ts';
@@ -29,13 +29,14 @@ export class CanvasRuntime {
  this.check(workshop,member,sessionHash,token);
  const binding=storageStatus(workshop,config).binding;
  demand(this.fixture||config&&binding?.status==='ready',503,'Tower Canvas data is not activated');
- const scope={installationId:config?.installationId||'fixture',target:binding?.target||{towerUrl:'https://fixture.invalid',workspaceId:'fixture',workspaceOwnerNpub:'fixture',appNpub:'fixture'},canvasId:workshop.id,user:member.pubkey};
+ const target=this.fixture?binding?.target||{towerUrl:'https://fixture.invalid',workspaceId:'fixture',workspaceOwnerNpub:'fixture',appNpub:'fixture'}:datasetTarget(workshop,config!);
+ const scope={installationId:config?.installationId||'fixture',target,canvasId:workshop.id,user:member.pubkey};
  const transport=this.fixture?this.fixture(scope):canvasTransport(scope,signal);
  const request:StorageTransport=async(url,method,body)=>{
   this.check(workshop,member,sessionHash,token);demand(!signal?.aborted,408,'Dataset request cancelled; read current data before retrying');
   demand(this.activeRequests<8,429,'Canvas data is busy; retry after reading current data');this.activeRequests++;
   try{
-   const result=await transport(url,method,body),reader=result.body?.getReader();const chunks:Uint8Array[]=[];let bytes=0;
+   const result=await transport(url,method,body);if(!this.fixture&&[401,403].includes(result.status))revokeDatasetBinding(workshop);const reader=result.body?.getReader();const chunks:Uint8Array[]=[];let bytes=0;
    try{if(reader)while(true){const next=await reader.read();if(next.done)break;bytes+=next.value.byteLength;demand(bytes<=9*1024*1024,502,'Tower dataset response exceeds bounded capacity');chunks.push(next.value);}}catch(e){await reader?.cancel();throw e;}
    this.check(workshop,member,sessionHash,token);demand(!signal?.aborted,408,'Dataset outcome may have committed; read current data before retrying');
    return new Response(Buffer.concat(chunks),{status:result.status,headers:result.headers});
