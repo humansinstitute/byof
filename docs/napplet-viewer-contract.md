@@ -30,7 +30,8 @@ through `moveBefore`; older browsers can reload a frame if its card is reordered
 
 Sandbox permissions remain `allow-scripts allow-forms`, with no same-origin
 privilege and no-referrer policy. The preview response and the cache transport's
-fresh runtime shell use the same content security policy, which denies network connections; the iframe
+fresh runtime shell use the same content security policy. It permits direct HTTPS fetches and secure WSS
+connections while continuing to deny remote active assets, frames, objects and form destinations; the iframe
 also explicitly denies camera, microphone, geolocation and payment. No new app or
 storage privileges are introduced.
 
@@ -94,4 +95,4 @@ audit rows for rename, activation, restore and sharing. Host conversation change
 continue through the separately audited host-follow-up route. Public publication
 consent remains owner-only and cannot be supplied by an administrator.
 
-Authenticated preview responses and fresh runtime bootstraps inject the [Napplet bridge v1](napplet-bridge-api.md) before app scripts. Identity consent, participant signing and durable per-user project storage travel over a channel bound to the existing frame; sandbox and network-denying CSP stay unchanged. Removing/replacing a frame revokes its grants, while resize/minimize/pop-out preserve its channel with the document.
+Authenticated preview responses and fresh runtime bootstraps inject the [Napplet bridge v1](napplet-bridge-api.md) before app scripts. Identity consent, participant signing and durable per-user project storage travel over a channel bound to the existing frame. Both paths use the same opaque-origin sandbox and CSP: direct HTTPS/WSS service calls are allowed, while remote code, frames, objects and form destinations remain blocked. Removing/replacing a frame revokes its grants, while resize/minimize/pop-out preserve its channel with the document.

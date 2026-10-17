@@ -6,6 +6,8 @@ test("operator execution preserves exact instruction and rejects changed approva
   const input = { requestId: "saved", approvedRequestId: "saved", projectId: "project", approvedProjectId: "project", prompt: "  game\n", approvedPrompt: "  game\n", source: "<html></html>" };
   const prepared = prepareOperatorBuild(input);
   expect(prepared.prompt).toContain(JSON.stringify({ instruction: input.prompt, currentSource: input.source }));
+  expect(prepared.prompt).toContain('Direct external HTTPS fetch and secure WSS are allowed');
+  expect(prepared.prompt).toContain('no external scripts, imports, stylesheets, frames, plugins or form destinations');
   expect(() => prepareOperatorBuild({ ...input, prompt: "game" })).toThrow();
   expect(() => prepareOperatorBuild({ ...input, requestId: "other" })).toThrow();
   expect(operatorDecision({ screen: { shadowStatus: "error" } }).builderAllowed).toBe(false);

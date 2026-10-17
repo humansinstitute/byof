@@ -17,7 +17,8 @@ Do not copy old draft Napplet fields into NIP-5A kind 35128, which now describes
 named nsites. Current Napplets are single self-contained HTML artifacts with one
 lowercase SHA256 `x` tag and nonempty plain-text description in event content.
 Capability `R`/`O` tags declare domains; they do not grant capabilities. The local
-workshop preview is an opaque-origin, network-denied iframe, not a claim that it
+workshop preview is an opaque-origin iframe with direct HTTPS/WSS service access,
+not a claim that it
 implements the signed-manifest NIP-5D runtime.
 
 `src/publication.ts` prepares immutable private snapshots and provides a publisher

@@ -73,8 +73,8 @@ test('prompt migration replaces only the literal obsolete paragraph and preserve
  }finally{app.db.close();rmSync(directory,{recursive:true,force:true});}
 });
 
-test('validator permits the injected API while external embedding stays forbidden; injection precedes scripts in standards mode',()=>{
- const html='<!doctype html><html><head><script>napplet.storage.set("key",{ok:true})</script></head><body></body></html>';
+test('validator permits inline APIs and direct service calls while active embedding stays forbidden; injection precedes scripts in standards mode',()=>{
+ const html='<!doctype html><html><head><script>fetch("https://api.example/data");new WebSocket("wss://socket.example");napplet.storage.set("key",{ok:true})</script></head><body></body></html>';
  expect(validateGeneratedHtml(html)).toBe(html);const served=injectNappletBridge(html,'test-document');expect(served.startsWith('<!doctype html><meta http-equiv="Content-Security-Policy"')).toBe(true);expect(injectNappletBridge('<!-- Intro -->'+html,'test-document').startsWith('<!-- Intro --><!doctype html><meta http-equiv="Content-Security-Policy"')).toBe(true);expect(served.indexOf("Object.defineProperty(window,'napplet'")).toBeLessThan(served.indexOf('napplet.storage.set'));
- for(const source of ['<html><iframe></iframe></html>','<html><script src="https://evil.test/x.js"></script></html>'])expect(()=>validateGeneratedHtml(source)).toThrow();
+ for(const source of ['<html><iframe></iframe></html>','<html><script src="https://evil.test/x.js"></script></html>','<html><script src="/host.js"></script></html>','<html><link rel="stylesheet" href="/host.css"></html>','<html><form action="https://evil.test/"></form></html>'])expect(()=>validateGeneratedHtml(source)).toThrow();
 });

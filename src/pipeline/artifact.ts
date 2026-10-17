@@ -11,6 +11,9 @@ export function validateGeneratedHtml(source: unknown): string {
   for (const tag of source.matchAll(/<([a-z][\w:-]*)\b[^>]*>/gi)) {
     const name=tag[1]!.toLowerCase();
     const attributes=tag[0].replace(/^<[^\s>]+/,'');
+    demand(!(name==='script'&&/\bsrc\s*=/i.test(attributes)) &&
+      !(name==='link'&&/\brel\s*=\s*(?:["']\s*)?stylesheet\b/i.test(attributes)) &&
+      !(name==='form'&&/\baction\s*=/i.test(attributes)),400,'Generated app must be self-contained');
     demand(!/\b(?:src|srcset|poster|data)\s*=\s*(?:["']\s*)?(?:https?:|\/\/)/i.test(attributes) &&
       (name==='a' || !/\bhref\s*=\s*(?:["']\s*)?(?:https?:|\/\/)/i.test(attributes)),400,'Generated app must be self-contained');
   }

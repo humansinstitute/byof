@@ -70,7 +70,7 @@ test("runnable starters have private SHA256 assets and restrictive preview sandb
     const account = await login(), d = await create(account,starterId), revision = d.revisions[0]; hashes.add(revision.source_hash);
     const preview = await call(`/api/v1/projects/${d.project.id}/preview?revision=${revision.id}`,undefined,account);
     expect(preview.response.status).toBe(200); expect(preview.data).toContain("<!doctype html>");
-    expect(preview.response.headers.get("content-security-policy")).toContain("sandbox allow-scripts"); expect(preview.response.headers.get("content-security-policy")).toContain("connect-src 'none'");
+    expect(preview.response.headers.get("content-security-policy")).toContain("sandbox allow-scripts"); expect(preview.response.headers.get("content-security-policy")).toContain("connect-src https: wss:");
     expect((await call(`/objects/${revision.source_hash}`,undefined,account)).response.status).toBe(404);
   }
   expect(hashes.size).toBe(5);

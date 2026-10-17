@@ -33,7 +33,7 @@ try {
     await expect(frame.locator('#score')).toHaveText('1');
     let previewLoads = 0; page.on('request', request => { if (request.url().includes('/preview?')) previewLoads++; });
     const previewResponse = await page.request.get(new URL((await page.locator('iframe').getAttribute('src'))!, server.url).href);
-    expect(previewResponse.headers()['content-security-policy']).toContain("connect-src 'none'");
+    expect(previewResponse.headers()['content-security-policy']).toContain('connect-src https: wss:');
     const open = page.getByRole('button', { name: 'Open larger' });
     await open.click();
     const viewer = page.locator('.expanded-viewer');

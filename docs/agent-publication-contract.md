@@ -54,8 +54,8 @@ claimed implementation without publication is shown as unpublished. Durable
 publication failure remains pending, with the last app playable and a useful
 error; storage retry resumes the same job without rerunning the native turn.
 
-Normal HTTPS anchor citations are navigation and pass validation. External
-runtime resources and embedding remain rejected; CSP enforces the network
+Normal HTTPS anchor citations are navigation and pass validation. Direct HTTPS/WSS
+service calls are allowed, while external active resources and embedding remain rejected; CSP enforces the runtime
 boundary even for dynamically constructed URLs. Public Blossom/Nostr publication
 remains a separate consented feature.
 

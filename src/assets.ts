@@ -21,4 +21,4 @@ export class Assets {
   getBytes(hash: string): Uint8Array { demand(/^[a-f0-9]{64}$/.test(hash), 400, "Invalid asset reference"); const bytes = readFileSync(join(this.root, hash)); demand(sha256(bytes) === hash, 500, "Asset integrity check failed"); return bytes; }
   get(hash: string): string { return Buffer.from(this.getBytes(hash)).toString(); }
 }
-export const previewPolicy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts allow-forms";
+export const previewPolicy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src 'none'; connect-src https: wss:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts allow-forms";

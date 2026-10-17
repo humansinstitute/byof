@@ -97,18 +97,24 @@ late results after revocation/timeouts are discarded. While an external signer
 remains unresolved, further signing calls fail with BUSY; reload/reopen after
 resolving the signer prompt.
 
-Sandbox remains `allow-scripts allow-forms`, without same-origin access. The
-network-denying CSP remains enforced, including `connect-src 'none'`, no frames,
-external resources or form destinations. The bridge does not expose private
-keys, host administration, generic fetch, relay publishing/AUTH, LLM APIs or external
-manifest/app publication. Public read-only relay access stays in the trusted parent.
+Sandbox remains `allow-scripts allow-forms`, without same-origin access. The CSP
+permits browser-native HTTPS fetch and secure WSS connections with `connect-src
+https: wss:`. Because the frame has an opaque origin, service endpoints see an
+`Origin: null` request where Origin applies and must opt into appropriate browser
+CORS; normal mixed-content behavior is not bypassed. Freedom Tools does not add
+cookies, credentials, secrets or a proxy. External scripts/imports/stylesheets,
+frames, objects/plugins and form destinations remain blocked. The bridge does not
+expose private keys, host administration, relay publishing/AUTH, LLM APIs or
+external manifest/app publication. Public read-only relay access stays in the
+trusted parent. Napplet code must present honest loading, offline, failure and
+partial states for direct services.
 
 ## Read-only relay domain
 
 This additive v1 domain implements the read side of current
 [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md), checked on
-2026-10-13. Generated code cannot create sockets or select network destinations.
-Only the trusted parent opens the exact approved public WSS registry:
+2026-10-13. This host-mediated relay domain remains limited to the exact approved
+public WSS registry, independently of the page's direct browser networking:
 `wss://relay.damus.io`, `wss://nos.lol`, `wss://relay.primal.net`.
 Other URLs, trailing paths/slashes, credentials, alternate schemes and private
 addresses are rejected, including URLs in event tags. Parent CSP permits this
@@ -186,9 +192,10 @@ check every ten seconds detects server-side logout/access loss; five-second chec
 failure closes the channel. Reopening requires a fresh document-bound handshake.
 
 Applications must render event content, names, tags and relay notices as text.
-The host verifies signatures, not the truth or safety of content. Never load
-runtime URLs/images/scripts from event data. Existing inline-assets validation,
-opaque iframe origin and `connect-src 'none'` remain unchanged.
+The host verifies signatures, not the truth or safety of content. Never turn
+untrusted relay data into runtime URLs, scripts or markup. Existing inline-active-
+asset validation and the opaque iframe origin remain unchanged; direct HTTPS/WSS
+does not expand the approved host-mediated relay registry.
 
 ## Relationship to NAP
 
@@ -211,8 +218,8 @@ custom text and names stay intact, revisions increment once, and already queued
 request/dispatch/epoch snapshots are untouched. The compact replacement is
 shorter than both obsolete paragraphs, including for prompts at the size limit.
 Fixed execution contracts and the managed builder template supply the full API
-subset while retaining external-resource restrictions. HTML validation already
-accepts inline bridge calls; its external embedding restrictions are unchanged.
+subset plus direct HTTPS/WSS guidance. HTML validation accepts inline bridge and
+service calls while retaining external active-resource and embedding restrictions.
 Managed pipeline installations pin bundled code: Rick must coordinate activation
 of the matching builder definitions/templates if their installed versions still
 contain the obsolete fixed contract. Source edits alone do not replace installed

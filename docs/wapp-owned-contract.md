@@ -22,7 +22,8 @@ new owned project with independent conversation/history and retained lineage.
 Instructions persist privately with `unavailable` status while builder prerequisites
 are missing. They do not invoke a builder or consume allowance. Previews retain the
 current successful revision with sandbox="allow-scripts allow-forms", no allow-same-origin and
-network-denying CSP. These previews are local workshop apps, not a claim of a
+an opaque-origin CSP that allows direct HTTPS/WSS service calls but denies remote
+active assets, frames, objects and form destinations. These previews are local workshop apps, not a claim of a
 verified signed NIP-5D runtime. Native generation, progress streaming and publication
 remain unavailable until the corresponding activated integrations pass acceptance.
 
