@@ -37,6 +37,7 @@ async function openStarter(width: number, height: number, index: number) {
   await page.goto(server.url.href, { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "Create a New Profile" }).click();
   await page.getByLabel("Display name").fill(`Starter ${width} ${index}`);
+  await page.getByText("Use a temporary identity instead", { exact: true }).click();
   await page.getByRole("button", { name: "Create temporary identity" }).click();
   await expect(page.getByRole("heading", { name: "Canvases" })).toBeVisible();
   await page.getByRole("button", { name: "Open Canvas" }).first().click();

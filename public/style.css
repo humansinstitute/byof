@@ -147,6 +147,16 @@ summary{cursor:pointer;font-weight:700}
 .login #entry-join-code .notice{margin:7px 0 0}
 .login-form{max-width:650px}
 .login-form>button{margin:20px 10px 0 0}
+.signup-primary{margin-top:24px;padding:24px;border:2px solid var(--ink);border-top:6px solid var(--orange);background:var(--soft)}
+.signup-primary h2{margin-bottom:10px}
+.signup-primary p{margin:10px 0}
+.signup-primary .notice{margin:14px 0 0}
+.signup-primary button{width:100%;margin-top:18px}
+.signup-fallback{margin-top:28px;padding-top:20px;border-top:1px solid var(--line)}
+.signup-fallback summary{color:var(--muted);font-size:14px}
+.signup-fallback-body{margin-top:14px;padding:18px;border:1px solid var(--line);background:var(--paper)}
+.signup-fallback .warning{margin:0 0 16px;color:#7d2b21}
+.signup-fallback button{background:transparent;color:var(--muted);border-color:var(--line)}
 .conversation-pane{align-self:start}
 .builder{margin-top:28px}
 .builder>.card{align-self:start}

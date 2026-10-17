@@ -47,6 +47,27 @@ test('both entry choices capture and preserve a code before authentication', () 
   expect(source).toContain("After authentication, join with code");
   expect(source).toContain("joinCodeError=error.message;screen='join-code'");
 });
+test('new-profile signup leads with external signer custody and demotes the temporary fallback', () => {
+  const login = source.match(/if \(screen === 'login'\)[^\n]+/)![0];
+  expect(login.indexOf('signup-primary')).toBeLessThan(login.indexOf('signup-fallback'));
+  expect(login.indexOf("button('extension'" )).toBeLessThan(login.indexOf("button('temporary'"));
+  expect(login).toContain('Continue with Nostr signer');
+  expect(login).toContain('Freedom Tools never receives your private key.');
+  expect(login).toContain('create a new key or import your existing key in the signer');
+  expect(login).toContain('Freedom Tools cannot command a signer to generate a key.');
+  expect(login).toContain('<details class="signup-fallback">');
+  expect(login).toContain('Temporary and not recoverable.');
+  expect(login).toContain('closing the tab or signing out removes it permanently');
+  expect(login).not.toContain('nsec');
+});
+test('missing-signer guidance is actionable without pretending Freedom Tools can create a key', () => {
+  const signIn = source.match(/async function signIn\(temporary\) \{[\s\S]*?\n\}/)![0];
+  expect(signIn).toContain('No Nostr signer is available.');
+  expect(signIn).toContain('create or import your key in the signer');
+  expect(signIn).toContain('Freedom Tools cannot create a key in your signer.');
+  expect(signIn.indexOf("if (temporary) signer = temporaryIdentity()" )).toBeLessThan(signIn.indexOf("window.nostr?.signEvent"));
+  expect(signIn).toContain("identityType:temporary ? 'temporary' : 'extension'");
+});
 test('choosing Workshops clears old deep links, selection and the workshop connection', async () => {
   const body = source.match(/async function workshopsPage\(\) \{[\s\S]*?\n\}/)![0];
   const calls: string[] = [];
