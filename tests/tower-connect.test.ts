@@ -61,10 +61,10 @@ test('selection automatically registers app, grants guest, starts one scoped job
  }finally{globalThis.fetch=saved;f.close();}
 });
 test('exact managed WApp binding reuses its installed namespace and only asks the user for the workspace invite',async()=>{
- const f=fixture(),saved=globalThis.fetch,prior={WAPP_INSTALLATION_ID:process.env.WAPP_INSTALLATION_ID,WAPP_TOWER_URL:process.env.WAPP_TOWER_URL,WAPP_TOWER_WORKSPACE_ID:process.env.WAPP_TOWER_WORKSPACE_ID,WAPP_TOWER_WORKSPACE_OWNER_NPUB:process.env.WAPP_TOWER_WORKSPACE_OWNER_NPUB,WAPP_APP_NPUB:process.env.WAPP_APP_NPUB};
+ const f=fixture(),saved=globalThis.fetch,prior={WAPP_TOWER_DB_BROKER_URL:process.env.WAPP_TOWER_DB_BROKER_URL,WAPP_TOWER_DB_CAPABILITY:process.env.WAPP_TOWER_DB_CAPABILITY,WAPP_INSTALLATION_ID:process.env.WAPP_INSTALLATION_ID,WAPP_TOWER_URL:process.env.WAPP_TOWER_URL,WAPP_TOWER_WORKSPACE_ID:process.env.WAPP_TOWER_WORKSPACE_ID,WAPP_TOWER_WORKSPACE_OWNER_NPUB:process.env.WAPP_TOWER_WORKSPACE_OWNER_NPUB,WAPP_APP_NPUB:process.env.WAPP_APP_NPUB};
  try{
   const workspaceId=crypto.randomUUID(),owner=nip19.npubEncode(f.member.pubkey),requests:string[]=[];
-  Object.assign(process.env,{WAPP_INSTALLATION_ID:f.template.installationId,WAPP_TOWER_URL:towerOrigin,WAPP_TOWER_WORKSPACE_ID:workspaceId,WAPP_TOWER_WORKSPACE_OWNER_NPUB:owner,WAPP_APP_NPUB:f.template.appNpub});
+  Object.assign(process.env,{WAPP_TOWER_DB_BROKER_URL:'http://127.0.0.1:1/api/internal/wapps/tower-db',WAPP_TOWER_DB_CAPABILITY:'runtime',WAPP_INSTALLATION_ID:f.template.installationId,WAPP_TOWER_URL:towerOrigin,WAPP_TOWER_WORKSPACE_ID:workspaceId,WAPP_TOWER_WORKSPACE_OWNER_NPUB:owner,WAPP_APP_NPUB:f.template.appNpub});
   globalThis.fetch=(async(url:any,init:any)=>{
    requests.push(String(url));
    if(String(url).endsWith('/workspaces'))return Response.json({workspaces:[{label:'Managed workspace',identity:{workspace_id:workspaceId,workspace_owner_npub:owner}}]});

@@ -35,6 +35,16 @@ envelope that changes the installation, app, owner, deployment origin or operati
 the underlying grant rejects route, definition, callback, run, expiry and revocation
 drift. It remains a pinned pipeline caller, not an HTTP proxy or signing endpoint.
 
+Canvas datasets use a separate backend-only `BYO_NSEC` on CapRover. It is not the
+managed-pipeline credential and must not replace or be included in pipeline
+configuration. Freedom Tools derives its npub at runtime and permits direct Tower
+app-database requests only when that identity exactly equals the saved Canvas target
+`appNpub`. Each descriptor, migration, query, create or conditional-update request
+gets a fresh NIP-98 signature over the exact HTTPS URL, method and JSON payload hash,
+with a short deadline and redirects disabled. Keep `BYO_NSEC` out of source, browser
+responses, logs and deployment evidence. Managed/local deployments continue to use
+the explicit loopback database-broker capability when present.
+
 Configure installation-wide storage only after the remote grant is active. Its
 storage template must use the same installation app identity in Autopilot custody,
 the exact NStack origin and the production callback. Keep builder/publication

@@ -253,12 +253,17 @@ Cancellation after a write starts does not imply rollback; refetch its outcome.
 
 Watches send invalidation hints, not values. Refetch on open, change and recovery.
 The server shares one version-only poll per authorized dataset/owner, checks each
-consumer's current access, and aborts when its last consumer leaves. Requests use
-the Autopilot runtime-only app database broker capability, a fresh 15-second
-request deadline and at most eight concurrent requests, without a waiting queue.
-Streams have bounded queues; child delivery uses bounded acknowledgements.
-Runtime values are never stored in pipeline jobs or builder snapshots. Historical
-dataset jobs are removed when the corrected runtime starts.
+consumer's current access, and aborts when its last consumer leaves. A managed
+local deployment uses Autopilot's explicit runtime-only app database broker
+capability. A separate CapRover deployment without that loopback capability uses
+its backend-only `BYO_NSEC` to sign the same exact Tower requests directly with
+NIP-98. The derived signer npub must equal the saved Canvas app identity. Both
+transports enforce the same descriptor/migration/query/create/conditional-update
+allowlist, exact destination, 15-second request deadline and no redirects.
+Requests are limited to eight concurrent operations without a waiting queue.
+Streams have bounded queues; child delivery uses bounded acknowledgements. Runtime
+values are never stored in pipeline jobs or builder snapshots. Historical dataset
+jobs are removed when the corrected runtime starts.
 
 Builder preparation supplies a fresh shared schema-only `canvasDatasets` snapshot.
 Builders must inspect names and field descriptions before creating a scheme and
@@ -266,11 +271,13 @@ must treat unavailable discovery as unavailable, rather than an empty Canvas.
 Private values are excluded. Existing project-private `napplet.storage` data is
 unchanged; copying or sharing it requires an explicit user-directed migration.
 
-Deployment requires the managed WApp's Tower DB runtime binding to match the
-Canvas destination. A mismatched workspace/Tower fails explicitly; it is never
-redirected to the app's bound destination. `scripts/canvas-broker-bind.ts` attaches
-an existing authorized Canvas destination using supported WApp store methods,
-preserving app key custody. The managed app must then restart to receive its
-runtime-only capability. This does not require an Autopilot restart. The corrected
-CREATE-only migration uses `canvas_dataset_records`; historical, unshipped
-`canvas_data` rows remain untouched and are not silently copied or shared.
+Deployment requires either an exact managed WApp Tower DB binding or the direct
+server signer whose derived npub exactly matches the Canvas/storage target. A
+mismatched workspace, Tower or signer fails explicitly; it is never redirected
+and recorded authority is never silently rewritten. Canvas setup registers the
+same stable Freedom Tools app namespace and workspace guest identity through the
+browser-reviewed signatures. Existing Canvases saved under another app identity
+must be explicitly reauthorized. `scripts/canvas-broker-bind.ts` remains the local
+managed-binding helper. The corrected CREATE-only migration uses
+`canvas_dataset_records`; historical, unshipped `canvas_data` rows remain untouched
+and are not silently copied or shared.

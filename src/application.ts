@@ -53,7 +53,8 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport:(sc
     const storage=site.storage(w.id);
     const readiness=storage?storageStatus(w,storage):null;
     if((!storage||readiness?.state!=='ready')&&!fixtures)return {canvasId:w.id,datasets:[],valuesIncluded:false,available:false,reason:'Tower Canvas data is not activated'};
-    if(!fixtures&&readiness?.datasetDiscovery?.code==='managed_binding_mismatch')return {canvasId:w.id,datasets:[],valuesIncluded:false,available:false,reason:readiness.datasetDiscovery.message};
+    const datasetDiscovery=readiness?.datasetDiscovery;
+    if(!fixtures&&datasetDiscovery?.code!=='exact_match')return {canvasId:w.id,datasets:[],valuesIncluded:false,available:false,reason:datasetDiscovery?.message||'Canvas dataset transport is unavailable'};
     const session=db.query('SELECT hash FROM sessions WHERE pubkey=? AND expires_at>? ORDER BY expires_at DESC LIMIT 1').get(member.pubkey,Math.floor(Date.now()/1000)) as any;
     demand(session,401,'Canvas discovery requires an active owner session');
     try{return await canvasRuntime.discovery(w,w.scoped(member),session.hash,storage);}catch(error){

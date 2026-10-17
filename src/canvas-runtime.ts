@@ -8,7 +8,7 @@ import { storageStatus } from './storage.ts';
 import type { StorageTransport } from './tower-storage-client.ts';
 import type { NappletData } from './napplet-data.ts';
 import { now } from './auth.ts';
-import { canvasBroker } from './canvas-broker.ts';
+import { canvasTransport } from './canvas-broker.ts';
 type Grant={token:string;sessionHash:string;user:string;canvas:string;destination:string;binding:DatasetBinding};
 type Watcher={grant:Grant;check:()=>void;send:(message:any)=>void;close:()=>void};
 type Poll={watchers:Set<Watcher>;controller:AbortController;timer:ReturnType<typeof setInterval>;busy:boolean;fingerprint:string;first:boolean;refresh:()=>Promise<void>};
@@ -30,7 +30,7 @@ export class CanvasRuntime {
  const binding=storageStatus(workshop,config).binding;
  demand(this.fixture||config&&binding?.status==='ready',503,'Tower Canvas data is not activated');
  const scope={installationId:config?.installationId||'fixture',target:binding?.target||{towerUrl:'https://fixture.invalid',workspaceId:'fixture',workspaceOwnerNpub:'fixture',appNpub:'fixture'},canvasId:workshop.id,user:member.pubkey};
- const transport=this.fixture?this.fixture(scope):canvasBroker(scope,signal);
+ const transport=this.fixture?this.fixture(scope):canvasTransport(scope,signal);
  const request:StorageTransport=async(url,method,body)=>{
   this.check(workshop,member,sessionHash,token);demand(!signal?.aborted,408,'Dataset request cancelled; read current data before retrying');
   demand(this.activeRequests<8,429,'Canvas data is busy; retry after reading current data');this.activeRequests++;

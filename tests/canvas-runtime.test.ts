@@ -2,7 +2,10 @@ import {test,expect} from 'bun:test';
 import {Database} from 'bun:sqlite';
 import {CanvasRuntime} from '../src/canvas-runtime.ts';
 import {CanvasTableFixture} from './canvas-fixture.ts';
-import {canvasBroker,canvasBrokerBindingStatus} from '../src/canvas-broker.ts';
+import {canvasBroker,canvasBrokerBindingStatus,canvasDirect,canvasTransport} from '../src/canvas-broker.ts';
+import {CanvasDatasetStore} from '../src/canvas-datasets.ts';
+import {sha256} from '../src/assets.ts';
+import {generateSecretKey,getPublicKey,nip19,verifyEvent} from 'nostr-tools';
 
 test('128 authorized watchers share version-only requests; abort stops all polling and slow consumers close',async()=>{
  const db=new Database(':memory:');db.exec('CREATE TABLE sessions(hash text,pubkey text,expires_at integer);CREATE TABLE workshop_storage_bindings(workshop_id text);CREATE TABLE storage_jobs(operation text);');
@@ -49,8 +52,46 @@ test('managed Canvas broker rejects destination drift and unconditional deletes 
 
 test('an existing Canvas target remains unchanged and becomes eligible only under an exact managed binding',()=>{
  const target={towerUrl:'https://nstack.otherstuff.ai',workspaceId:'nstack-workspace',workspaceOwnerNpub:'nstack-owner',appNpub:'freedom-app'},scope={installationId:'freedom-installation',canvasId:'testing-canvas',user:'a'.repeat(64),target},before=JSON.stringify(target);
- const singleOtherBinding={WAPP_INSTALLATION_ID:scope.installationId,WAPP_TOWER_URL:'https://sb4.otherstuff.studio',WAPP_TOWER_WORKSPACE_ID:'sb4-workspace',WAPP_TOWER_WORKSPACE_OWNER_NPUB:'sb4-owner',WAPP_APP_NPUB:target.appNpub};
+ const singleOtherBinding={WAPP_TOWER_DB_BROKER_URL:'http://127.0.0.1:1/api/internal/wapps/tower-db',WAPP_TOWER_DB_CAPABILITY:'runtime',WAPP_INSTALLATION_ID:scope.installationId,WAPP_TOWER_URL:'https://sb4.otherstuff.studio',WAPP_TOWER_WORKSPACE_ID:'sb4-workspace',WAPP_TOWER_WORKSPACE_OWNER_NPUB:'sb4-owner',WAPP_APP_NPUB:target.appNpub};
  expect(canvasBrokerBindingStatus(scope,singleOtherBinding).code).toBe('managed_binding_mismatch');
  const supportedExactBinding={...singleOtherBinding,WAPP_TOWER_URL:target.towerUrl,WAPP_TOWER_WORKSPACE_ID:target.workspaceId,WAPP_TOWER_WORKSPACE_OWNER_NPUB:target.workspaceOwnerNpub};
  expect(canvasBrokerBindingStatus(scope,supportedExactBinding).code).toBe('exact_match');expect(JSON.stringify(target)).toBe(before);
+});
+
+test('direct Canvas transport signs each exact Tower request and empty discovery stays available',async()=>{
+ const secret=generateSecretKey(),appNpub=nip19.npubEncode(getPublicKey(secret));
+ const scope={installationId:crypto.randomUUID(),canvasId:crypto.randomUUID(),user:'a'.repeat(64),target:{towerUrl:'https://tower.test',workspaceId:crypto.randomUUID(),workspaceOwnerNpub:nip19.npubEncode('b'.repeat(64)),appNpub}};
+ const env={BYO_NSEC:nip19.nsecEncode(secret)},seen:{url:string;method:string;payload?:string}[]=[];
+ const request=canvasDirect(scope,undefined,env,async(input,init)=>{
+  const url=String(input),method=String(init?.method),payload=typeof init?.body==='string'?init.body:undefined;
+  const encoded=String((init?.headers as Record<string,string>).authorization).replace(/^Nostr /,''),event=JSON.parse(Buffer.from(encoded,'base64').toString());
+  expect(verifyEvent(event)).toBe(true);expect(event.pubkey).toBe(getPublicKey(secret));expect(event.kind).toBe(27235);expect(event.content).toBe('');
+  expect(event.tags.filter((t:string[])=>t[0]==='u')).toEqual([['u',url]]);expect(event.tags.filter((t:string[])=>t[0]==='method')).toEqual([['method',method]]);
+  expect(event.tags.filter((t:string[])=>t[0]==='payload')).toEqual(payload===undefined?[]:[['payload',sha256(payload)]]);
+  expect(init?.redirect).toBe('error');seen.push({url,method,payload});
+  if(url.endsWith('/descriptor'))return Response.json({capabilities:{conditional_update:true}});
+  if(url.endsWith('/migrations'))return Response.json({migrations:[]});
+  return Response.json({rows:[]});
+ });
+ const store=new CanvasDatasetStore(scope,request);await store.ensure();expect(await store.discovery()).toEqual([]);
+ expect(seen.map(call=>[call.url.slice(store.base.length),call.method])).toEqual([['/descriptor','GET'],['/migrations','POST'],['/tables/canvas_dataset_records/query','POST']]);
+ expect(canvasBrokerBindingStatus(scope,env)).toMatchObject({code:'exact_match',transport:'direct_nip98',signerNpub:appNpub});
+});
+
+test('direct Canvas transport fails closed for missing, invalid, mismatched and disallowed authority',async()=>{
+ const secret=generateSecretKey(),other=generateSecretKey(),appNpub=nip19.npubEncode(getPublicKey(secret));
+ const scope={installationId:'installation',canvasId:'canvas',user:'a'.repeat(64),target:{towerUrl:'https://tower.test',workspaceId:'workspace',workspaceOwnerNpub:nip19.npubEncode('b'.repeat(64)),appNpub}};
+ expect(()=>canvasDirect(scope,undefined,{})).toThrow('configure the backend-only BYO_NSEC');
+ expect(()=>canvasDirect(scope,undefined,{BYO_NSEC:'not-a-secret'})).toThrow('BYO_NSEC is invalid');
+ const mismatch={BYO_NSEC:nip19.nsecEncode(other)};expect(canvasBrokerBindingStatus(scope,mismatch).code).toBe('signer_target_mismatch');expect(()=>canvasDirect(scope,undefined,mismatch)).toThrow('reauthorization is required');
+ const request=canvasDirect(scope,undefined,{BYO_NSEC:nip19.nsecEncode(secret)},async()=>Response.json({}));
+ await expect(request('https://foreign.test/api/v4/workspaces/x/apps/y/db/descriptor','GET')).rejects.toThrow('denied');
+ await expect(request(`https://tower.test/api/v4/workspaces/${scope.target.workspaceOwnerNpub}/apps/${appNpub}/db/tables/canvas_dataset_records/rows/${'a'.repeat(64)}`,'DELETE')).rejects.toThrow('denied');
+});
+
+test('explicit managed loopback capability remains preferred over direct signing',async()=>{
+ const scope={installationId:'installation',canvasId:'canvas',user:'a'.repeat(64),target:{towerUrl:'https://tower.test',workspaceId:'workspace',workspaceOwnerNpub:'owner',appNpub:'app'}};
+ const env={BYO_NSEC:'invalid-on-purpose',WAPP_TOWER_DB_BROKER_URL:'http://127.0.0.1:1/api/internal/wapps/tower-db',WAPP_TOWER_DB_CAPABILITY:'runtime',WAPP_INSTALLATION_ID:'installation',WAPP_TOWER_URL:'https://tower.test',WAPP_TOWER_WORKSPACE_ID:'workspace',WAPP_TOWER_WORKSPACE_OWNER_NPUB:'owner',WAPP_APP_NPUB:'app'};
+ let called='';const request=canvasTransport(scope,undefined,env,async(input,init)=>{called=String(input);expect((init?.headers as Record<string,string>).authorization).toBe('Bearer runtime');return Response.json({ok:true});});
+ await request('https://tower.test/api/v4/workspaces/owner/apps/app/db/descriptor','GET');expect(called).toBe(env.WAPP_TOWER_DB_BROKER_URL);
 });
