@@ -1,7 +1,7 @@
 import { finalizeEvent, getPublicKey, nip19 } from 'nostr-tools';
 import { sha256 } from './assets.ts';
 import { demand } from './errors.ts';
-import type { DatasetScope } from './canvas-datasets.ts';
+import { canvasDatasetProvision, type DatasetScope } from './canvas-datasets.ts';
 import type { StorageTransport } from './tower-storage-client.ts';
 
 type RuntimeEnv=Record<string,string|undefined>;
@@ -58,6 +58,7 @@ function canvasRequestPath(scope:DatasetScope,url:string,method:string,body?:unk
  const base=`${scope.target.towerUrl}/api/v4/workspaces/${scope.target.workspaceOwnerNpub}/apps/${scope.target.appNpub}/db`;
  const path=url.slice(base.length);
  const allowed=url.startsWith(base+'/')&&(
+  path==='/provision'&&method==='POST'&&JSON.stringify(body)===JSON.stringify(canvasDatasetProvision)||
   path==='/descriptor'&&method==='GET'&&body===undefined||
   path==='/migrations'&&method==='POST'&&body!==undefined||
   path==='/tables/canvas_dataset_records/query'&&method==='POST'&&body!==undefined||

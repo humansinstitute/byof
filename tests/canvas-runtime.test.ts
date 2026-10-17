@@ -3,7 +3,7 @@ import {Database} from 'bun:sqlite';
 import {CanvasRuntime} from '../src/canvas-runtime.ts';
 import {CanvasTableFixture} from './canvas-fixture.ts';
 import {canvasBroker,canvasBrokerBindingStatus,canvasDirect,canvasTransport} from '../src/canvas-broker.ts';
-import {CanvasDatasetStore} from '../src/canvas-datasets.ts';
+import {CanvasDatasetStore,canvasDatasetProvision} from '../src/canvas-datasets.ts';
 import {sha256} from '../src/assets.ts';
 import {generateSecretKey,getPublicKey,nip19,verifyEvent} from 'nostr-tools';
 
@@ -46,6 +46,8 @@ test('managed Canvas broker rejects destination drift and unconditional deletes 
  expect(()=>canvasBroker(scope,undefined,{...env,WAPP_TOWER_URL:'https://sb4.otherstuff.studio'})).toThrow('not authorized by the managed broker binding');
  expect(()=>canvasBroker({...scope,target:{...scope.target,workspaceId:'other'}},undefined,env)).toThrow('not authorized');
  const request=canvasBroker(scope,undefined,env);
+ await expect(request('https://tower.test/api/v4/workspaces/owner/apps/app/db/provision','POST',{app_slug:'wrong'})).rejects.toThrow('denied');
+ await expect(request('https://tower.test/api/v4/workspaces/owner/apps/app/db/provision','GET',canvasDatasetProvision)).rejects.toThrow('denied');
  await expect(request('https://tower.test/api/v4/workspaces/owner/apps/app/db/tables/canvas_dataset_records/rows/'+'a'.repeat(64),'DELETE')).rejects.toThrow('denied');
  await expect(request('https://foreign.test/api/v4/workspaces/owner/apps/app/db/descriptor','GET')).rejects.toThrow('denied');
 });
@@ -69,12 +71,14 @@ test('direct Canvas transport signs each exact Tower request and empty discovery
   expect(event.tags.filter((t:string[])=>t[0]==='u')).toEqual([['u',url]]);expect(event.tags.filter((t:string[])=>t[0]==='method')).toEqual([['method',method]]);
   expect(event.tags.filter((t:string[])=>t[0]==='payload')).toEqual(payload===undefined?[]:[['payload',sha256(payload)]]);
   expect(init?.redirect).toBe('error');seen.push({url,method,payload});
+  if(url.endsWith('/provision'))return Response.json({ok:true});
   if(url.endsWith('/descriptor'))return Response.json({capabilities:{conditional_update:true}});
   if(url.endsWith('/migrations'))return Response.json({migrations:[]});
   return Response.json({rows:[]});
  });
  const store=new CanvasDatasetStore(scope,request);await store.ensure();expect(await store.discovery()).toEqual([]);
- expect(seen.map(call=>[call.url.slice(store.base.length),call.method])).toEqual([['/descriptor','GET'],['/migrations','POST'],['/tables/canvas_dataset_records/query','POST']]);
+ expect(seen.map(call=>[call.url.slice(store.base.length),call.method])).toEqual([['/provision','POST'],['/descriptor','GET'],['/migrations','POST'],['/tables/canvas_dataset_records/query','POST']]);
+ expect(seen[0]?.payload).toBe(JSON.stringify(canvasDatasetProvision));
  expect(canvasBrokerBindingStatus(scope,env)).toMatchObject({code:'exact_match',transport:'direct_nip98',signerNpub:appNpub});
 });
 

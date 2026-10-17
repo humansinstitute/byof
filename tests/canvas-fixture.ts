@@ -5,6 +5,7 @@ export class CanvasTableFixture {
  request:StorageTransport=async(url,method,body:any)=>{
   if(this.offline)throw Error('Synthetic Tower disconnect');
   const path=new URL(url).pathname;
+  if(path.endsWith('/provision'))return Response.json({ok:true});
   if(path.endsWith('/descriptor'))return Response.json({capabilities:{conditional_update:this.atomic}});
   if(path.endsWith('/migrations'))return Response.json({ok:true});
   if(path.endsWith('/query')){

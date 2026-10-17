@@ -1,4 +1,4 @@
-import { canvasDataMigration } from '../canvas-datasets.ts';
+import { canvasDataMigration, canvasDatasetProvision } from '../canvas-datasets.ts';
 import { namespaceMigration } from '../tower-namespace.ts';
 import { randomUUID } from 'node:crypto';
 import { publicKey } from '../config.ts';
@@ -51,7 +51,8 @@ const target=new URL(url);
           if(job.operation==='dataset'){
             const planned=job.candidate?.request;
             const path=target.pathname;
-            const bounded=path===namespaceBase+'/descriptor'&&method==='GET'&&body===undefined
+            const bounded=path===namespaceBase+'/provision'&&method==='POST'&&JSON.stringify(body)===JSON.stringify(canvasDatasetProvision)
+              || path===namespaceBase+'/descriptor'&&method==='GET'&&body===undefined
               || path===namespaceBase+'/migrations'&&method==='POST'&&JSON.stringify(body)===JSON.stringify(canvasDataMigration)
               || path===namespaceBase+'/tables/canvas_dataset_records/query'&&method==='POST'
               || path===namespaceBase+'/tables/canvas_dataset_records/rows'&&method==='POST'
