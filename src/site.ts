@@ -99,7 +99,7 @@ export class Site {
         demand(canvas,404,'Canvas not found');
         demand(!!member.admin||canvas.owner===member.pubkey,403,'Canvas owner or site administrator access required');
         demand(id!==this.legacy(),409,'The default Canvas cannot be deleted because Freedom Tools requires it for legacy links and bootstrap state');
-        demand(body?.confirmPermanent===true&&body?.confirmTitle===canvas.title,400,`Type ${canvas.title} and confirm permanent deletion`);
+        demand(body?.confirmPermanent===true&&body?.confirmText==='CONFIRM',400,'Type CONFIRM and confirm permanent deletion');
         const immutableDeletes=['epoch_history_no_delete','host_request_audit_no_delete','project_admin_audit_no_delete','project_fork_no_delete','request_attachment_no_delete','request_engine_correction_no_delete','request_engine_no_delete','request_epoch_no_delete','request_prompt_no_delete','revision_no_delete'];
         const triggers=this.db.query(`SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name IN (${immutableDeletes.map(()=>'?').join(',')})`).all(...immutableDeletes) as {name:string;sql:string}[];
         const projectScope='SELECT id FROM projects WHERE workshop_id=?';

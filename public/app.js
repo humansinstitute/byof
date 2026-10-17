@@ -1080,7 +1080,7 @@ document.addEventListener('click', async event => {
     if(action==='edit-workshop'){if(!workshops.find(w=>w.id===id)?.canManage)throw Error('BYOF Canvas management access required');nappletHost.revoke();selectedWorkshop=id;detail=null;requestedProjectId=null;towerWorkspaces=[];await page();connect();screen='edit';menu=false;render();}
     if(action==='confirm-canvas-delete'){
       const canvas=workshops.find(w=>w.id===id);if(!canvas?.canDelete)throw Error('Canvas deletion access required');
-      dialog(`<h2>Delete ${esc(canvas.title)} Canvas?</h2><p>This permanently deletes this Canvas, its memberships, Napplets, conversations, and other Freedom Tools records. This cannot be undone.</p><p class="notice">Canvas datasets and published artifacts stored by external services will not be deleted.</p><form id="canvas-delete-form" data-id="${esc(canvas.id)}" data-title="${esc(canvas.title)}"><label for="canvas-delete-confirm">Type <strong>${esc(canvas.title)}</strong> to confirm</label><input id="canvas-delete-confirm" autocomplete="off" required><p id="canvas-delete-error" class="error" role="alert" hidden></p><button id="canvas-delete-submit" class="danger" type="submit" disabled>Permanently delete Canvas</button></form>`,target);
+      dialog(`<h2>Delete ${esc(canvas.title)} Canvas?</h2><p>This permanently deletes this Canvas, its memberships, Napplets, conversations, and other Freedom Tools records. This cannot be undone.</p><p class="notice">Canvas datasets and published artifacts stored by external services will not be deleted.</p><form id="canvas-delete-form" data-id="${esc(canvas.id)}" data-title="${esc(canvas.title)}"><label for="canvas-delete-confirm">Type <strong>CONFIRM</strong> to permanently delete this Canvas</label><input id="canvas-delete-confirm" autocomplete="off" autocapitalize="characters" spellcheck="false" required><p id="canvas-delete-error" class="error" role="alert" hidden></p><button id="canvas-delete-submit" class="danger" type="submit" disabled>Permanently delete Canvas</button></form>`,target);
     }
     if(action==='resume-canvas-probe')await resumeCanvasProbe();
     if(action==='complete-canvas-setup')await completeCanvasSetup(id);
@@ -1211,7 +1211,7 @@ document.addEventListener('submit', async event => {
     if(event.target.id==='code-join-form'){const code=rememberJoinCode($('#workshop-code').value);if(me)await redeemJoinCode(code);else{signUp=true;screen='login';render();}}
     if(event.target.id==='canvas-delete-form'){
       const id=event.target.dataset.id,title=event.target.dataset.title;
-      await api(`workshops/${id}`,{confirmTitle:$('#canvas-delete-confirm').value,confirmPermanent:true},'DELETE',id);
+      await api(`workshops/${id}`,{confirmText:$('#canvas-delete-confirm').value,confirmPermanent:true},'DELETE',id);
       if(canvasDraft().workshopId===id)sessionStorage.removeItem(canvasDraftKey());
       nappletHost.revoke();clearTimeout(reconnectTimer);socket?.close();socket=null;selectedWorkshop='';state=null;detail=null;people=null;publication=null;storage=null;towerWorkspaces=[];managementWorkshop=null;if(promptWorkshopId===id)promptWorkshopId=null;
       workshops=workshops.filter(w=>w.id!==id);cacheWorkshops(workshops);$('#dialog').close();await workshopsPage();toast(`${title} was deleted from Freedom Tools. External datasets and published artifacts were left unchanged.`);
@@ -1243,7 +1243,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&menu){menu=false;re
 document.addEventListener('click',e=>{if(menu&&!e.composedPath().includes($('#identity'))){menu=false;render();}});
 document.addEventListener('error',e=>{if(e.target instanceof HTMLImageElement){const avatar=e.target.closest('.avatar');if(avatar)avatar.textContent=me?initials(profileName(me)):'WP';else e.target.hidden=true;}},true);
 
-document.addEventListener('input',event=>{if(event.target.id==='workshop-code'&&screen==='start')rememberJoinCode(event.target.value);if(event.target.closest('#profile-form'))$('#profile-form').dataset.dirty='true';if(event.target.id==='canvas-delete-confirm'){const form=event.target.closest('form'),submit=$('#canvas-delete-submit');submit.disabled=event.target.value!==form.dataset.title;$('#canvas-delete-error').hidden=true;}});
+document.addEventListener('input',event=>{if(event.target.id==='workshop-code'&&screen==='start')rememberJoinCode(event.target.value);if(event.target.closest('#profile-form'))$('#profile-form').dataset.dirty='true';if(event.target.id==='canvas-delete-confirm'){const submit=$('#canvas-delete-submit');submit.disabled=event.target.value!=='CONFIRM';$('#canvas-delete-error').hidden=true;}});
 document.addEventListener('focus',event=>{if(event.target.id==='workshop-code'&&event.target.value.length===event.target.maxLength)event.target.select();},true);
 
 $('#dialog').addEventListener('cancel',()=>{towerSetupEpoch++;});

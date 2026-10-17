@@ -29,7 +29,7 @@ try{
       deleteCalls.push(deletion[1]!);
       if(isParticipant){await route.fulfill({status:403,json:{error:'Canvas owner or site administrator access required'}});return;}
       const canvas=remaining.find(item=>item.id===deletion[1]),body=request.postDataJSON();
-      expect(request.headers()['x-csrf-token']).toBe('fixture');expect(body).toMatchObject({confirmTitle:canvas?.title,confirmPermanent:true});
+      expect(request.headers()['x-csrf-token']).toBe('fixture');expect(body).toMatchObject({confirmText:'CONFIRM',confirmPermanent:true});
       if(deletion[1]===errorId){await route.fulfill({status:500,json:{error:'Synthetic transaction failure'}});return;}
       remaining.splice(remaining.findIndex(item=>item.id===deletion[1]),1);
       await route.fulfill({json:{deletedCanvasId:deletion[1],externalDataRetained:true,message:'Canvas deleted; external data retained'}});return;
@@ -48,18 +48,19 @@ try{
   await expect(page.getByRole('dialog')).toContainText('cannot be undone');
   await expect(page.getByRole('dialog')).toContainText('datasets and published artifacts');
   const permanent=page.getByRole('button',{name:'Permanently delete Canvas'});await expect(permanent).toBeDisabled();
-  await page.getByLabel('Type Project Sunrise to confirm').fill('Project');await expect(permanent).toBeDisabled();
-  await page.getByLabel('Type Project Sunrise to confirm').fill('Project Sunrise');await expect(permanent).toBeEnabled();
+  const confirmation=page.getByLabel('Type CONFIRM to permanently delete this Canvas');
+  await confirmation.fill('confirm');await expect(permanent).toBeDisabled();
+  await confirmation.fill('CONFIRM');await expect(permanent).toBeEnabled();
   await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).not.toBeVisible();expect(deleteCalls).toEqual([]);
 
   const failing=page.locator('section.canvas-card').filter({hasText:'Keep On Failure'});
-  await failing.getByRole('button',{name:'Delete Canvas'}).click();await page.getByLabel('Type Keep On Failure to confirm').fill('Keep On Failure');await permanent.click();
+  await failing.getByRole('button',{name:'Delete Canvas'}).click();await confirmation.fill('CONFIRM');await permanent.click();
   await expect(page.getByRole('dialog')).toBeVisible();await expect(page.getByRole('alert')).toHaveText('Synthetic transaction failure');await expect(failing).toBeVisible();
   expect(await page.evaluate(id=>JSON.parse(sessionStorage.getItem('freedom-canvases:'+'a'.repeat(64))||'[]').some((item:any)=>item.id===id),errorId)).toBe(true);
   await page.getByRole('dialog').getByRole('button',{name:'Close'}).click();
 
   await page.evaluate(({owner,id})=>sessionStorage.setItem('canvas-create:'+owner,JSON.stringify({workshopId:id,title:'Project Sunrise'})),{owner,id:successId});
-  await sunrise.getByRole('button',{name:'Delete Canvas'}).click();await page.getByLabel('Type Project Sunrise to confirm').fill('Project Sunrise');await permanent.click();
+  await sunrise.getByRole('button',{name:'Delete Canvas'}).click();await confirmation.fill('CONFIRM');await permanent.click();
   await expect(sunrise).toHaveCount(0);await expect(page.getByRole('heading',{name:'Canvases'})).toBeVisible();expect(new URL(page.url()).searchParams.has('workshop')).toBe(false);
   expect(await page.evaluate(owner=>sessionStorage.getItem('canvas-create:'+owner),owner)).toBeNull();
   expect(await page.evaluate(id=>JSON.parse(sessionStorage.getItem('freedom-canvases:'+'a'.repeat(64))||'[]').some((item:any)=>item.id===id),successId)).toBe(false);

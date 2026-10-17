@@ -31,11 +31,12 @@ test('only the owner or site admin can delete a non-legacy Canvas with exact con
   const admin=await login(hostKey),owner=await login(),participant=await login(),canvas=await createCanvas(admin,'Owned Canvas',owner.member.pubkey);
   await call('host/settings',{title:canvas.title,introduction:canvas.introduction,lightning:'',admission:'open',paused:false},owner,canvas.id);
   await call('workshops/join',{},participant,canvas.id);
-  expect((await call(`workshops/${canvas.id}`,{confirmTitle:canvas.title,confirmPermanent:true},participant,canvas.id,'DELETE')).status).toBe(403);
-  expect((await call(`workshops/${canvas.id}`,{confirmTitle:'wrong',confirmPermanent:true},owner,canvas.id,'DELETE')).status).toBe(400);
+  expect((await call(`workshops/${canvas.id}`,{confirmText:'CONFIRM',confirmPermanent:true},participant,canvas.id,'DELETE')).status).toBe(403);
+  expect((await call(`workshops/${canvas.id}`,{confirmText:'confirm',confirmPermanent:true},owner,canvas.id,'DELETE')).status).toBe(400);
+  expect((await call(`workshops/${canvas.id}`,{confirmTitle:canvas.title,confirmPermanent:true},owner,canvas.id,'DELETE')).status).toBe(400);
   const wrongCsrf={...owner,csrf:'wrong'};
-  expect((await call(`workshops/${canvas.id}`,{confirmTitle:canvas.title,confirmPermanent:true},wrongCsrf,canvas.id,'DELETE')).status).toBe(403);
-  const deleted=await call(`workshops/${canvas.id}`,{confirmTitle:canvas.title,confirmPermanent:true},owner,canvas.id,'DELETE');
+  expect((await call(`workshops/${canvas.id}`,{confirmText:'CONFIRM',confirmPermanent:true},wrongCsrf,canvas.id,'DELETE')).status).toBe(403);
+  const deleted=await call(`workshops/${canvas.id}`,{confirmText:'CONFIRM',confirmPermanent:true},owner,canvas.id,'DELETE');
   expect(deleted.status).toBe(200);expect(deleted.data).toMatchObject({deletedCanvasId:canvas.id,externalDataRetained:true});
   expect(app.db.query('SELECT id FROM workshops WHERE id=?').get(canvas.id)).toBeNull();
 });
@@ -48,7 +49,7 @@ test('Canvas deletion removes the complete local graph and leaves another Canvas
   app.db.run('INSERT INTO napplet_user_data VALUES(?,?,?,?,?,?)',[canvas.id,project.id,user.member.pubkey,'score','1',1]);
   app.db.run('INSERT INTO publication_snapshots VALUES(?,?,?,?,?)',[crypto.randomUUID(),owner.member.pubkey,JSON.stringify({workshopId:canvas.id,apps:[]}), 'prepared',1]);
   app.db.run('INSERT INTO project_admin_audit VALUES(?,?,?,?,?,?,?,?)',[crypto.randomUUID(),canvas.id,project.id,user.member.pubkey,owner.member.pubkey,'fixture','{}',1]);
-  expect((await call(`workshops/${canvas.id}`,{confirmTitle:canvas.title,confirmPermanent:true},admin,canvas.id,'DELETE')).status).toBe(200);
+  expect((await call(`workshops/${canvas.id}`,{confirmText:'CONFIRM',confirmPermanent:true},admin,canvas.id,'DELETE')).status).toBe(200);
   for(const [table,column,value] of [
     ['workshops','id',canvas.id],['workshop_members','workshop_id',canvas.id],['workshop_prompts','workshop_id',canvas.id],['workshop_boards','workshop_id',canvas.id],['workshop_board_images','workshop_id',canvas.id],['canvas_create_intents','workshop_id',canvas.id],['napplet_user_data','workshop_id',canvas.id],['projects','workshop_id',canvas.id],['revisions','project_id',project.id],['requests','id',requestId],['project_admin_audit','workshop_id',canvas.id]
   ] as const)expect(app.db.query(`SELECT count(*) n FROM ${table} WHERE ${column}=?`).get(value)).toEqual({n:0});
@@ -62,12 +63,12 @@ test('Canvas deletion removes the complete local graph and leaves another Canvas
 test('the default Canvas is preserved and a failed final delete rolls back every dependent change',async()=>{
   const admin=await login(hostKey),owner=await login(),user=await login(),legacy=app.site.legacy();
   const legacyRow=app.db.query('SELECT title FROM workshops WHERE id=?').get(legacy) as any;
-  expect((await call(`workshops/${legacy}`,{confirmTitle:legacyRow.title,confirmPermanent:true},admin,legacy,'DELETE')).status).toBe(409);
+  expect((await call(`workshops/${legacy}`,{confirmText:'CONFIRM',confirmPermanent:true},admin,legacy,'DELETE')).status).toBe(409);
 
   const canvas=await createCanvas(admin,'Atomic Canvas',owner.member.pubkey),project=await seedProject(owner,user,canvas);
   const before={projects:app.db.query('SELECT count(*) n FROM projects WHERE workshop_id=?').get(canvas.id),requests:app.db.query('SELECT count(*) n FROM requests WHERE project_id=?').get(project.id)};
   app.db.exec(`CREATE TRIGGER fail_canvas_delete BEFORE DELETE ON workshops WHEN OLD.id='${canvas.id}' BEGIN SELECT RAISE(ABORT,'fixture final delete failure'); END;`);
-  expect((await call(`workshops/${canvas.id}`,{confirmTitle:canvas.title,confirmPermanent:true},owner,canvas.id,'DELETE')).status).toBe(500);
+  expect((await call(`workshops/${canvas.id}`,{confirmText:'CONFIRM',confirmPermanent:true},owner,canvas.id,'DELETE')).status).toBe(500);
   expect(app.db.query('SELECT count(*) n FROM projects WHERE workshop_id=?').get(canvas.id)).toEqual(before.projects);
   expect(app.db.query('SELECT count(*) n FROM requests WHERE project_id=?').get(project.id)).toEqual(before.requests);
   expect(app.db.query("SELECT name FROM sqlite_master WHERE type='trigger' AND name='revision_no_delete'").get()).toEqual({name:'revision_no_delete'});
