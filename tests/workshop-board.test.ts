@@ -3,6 +3,9 @@ import {application} from '../src/application.ts';
 import {generateSecretKey,getPublicKey,finalizeEvent} from 'nostr-tools';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {sha256} from '../src/assets.ts';
+import {deflateSync} from 'node:zlib';
+import {limits} from '../src/config.ts';
+import {boardImageLimit} from '../src/workshop-images.ts';
 const origin='https://board.test';
 let app:ReturnType<typeof application>,dir:string,hostKey:Uint8Array;
 type Account={cookie:string;csrf:string;member:any};
@@ -14,6 +17,15 @@ async function login(key=generateSecretKey()):Promise<Account>{const c=(await ca
 async function setup(){const host=await login(hostKey);await call('host/settings',host,{title:'Board',introduction:'Test',admission:'open',lightning:'',paused:false});return{host,a:await login(),b:await login()};}
 async function create(a:Account,starterId='dice'){return(await call('projects',a,{starterId})).data.project;}
 const room=async(a:Account)=>(await call('room',a)).data;
+function crc32(bytes:Uint8Array){let crc=-1;for(const byte of bytes){crc^=byte;for(let bit=0;bit<8;bit++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);}return (crc^-1)>>>0;}
+function pngChunk(type:string,data:Uint8Array){const typeBytes=Buffer.from(type),chunk=Buffer.alloc(12+data.length);chunk.writeUInt32BE(data.length);typeBytes.copy(chunk,4);Buffer.from(data).copy(chunk,8);chunk.writeUInt32BE(crc32(chunk.subarray(4,8+data.length)),8+data.length);return chunk;}
+function png(width:number,height:number,targetBytes=0){
+ const header=Buffer.alloc(13);header.writeUInt32BE(width);header.writeUInt32BE(height,4);header[8]=8;header[9]=6;
+ const scanline=Buffer.alloc(1+width*4),raw=Buffer.alloc(scanline.length*height);for(let row=0;row<height;row++)scanline.copy(raw,row*scanline.length);
+ const chunks=[Buffer.from([137,80,78,71,13,10,26,10]),pngChunk('IHDR',header),pngChunk('IDAT',deflateSync(raw))],end=pngChunk('IEND',Buffer.alloc(0));
+ const current=chunks.reduce((total,value)=>total+value.length,0)+end.length;if(targetBytes){expect(targetBytes-current).toBeGreaterThanOrEqual(12);chunks.push(pngChunk('vpAg',Buffer.alloc(targetBytes-current-12,7)));}
+ return Buffer.concat([...chunks,end]);
+}
 beforeEach(()=>{dir=mkdtempSync('/tmp/freedom-board-');hostKey=generateSecretKey();app=application({origin,hostPubkey:getPublicKey(hostKey),dataDir:dir,version:'board-test'});});
 afterEach(()=>{app.db.close();rmSync(dir,{recursive:true,force:true});});
 test('active board follows completed checkpoints, excludes hidden/banned and exposes no private records',async()=>{
@@ -123,6 +135,15 @@ test('uploaded raster bytes are immutable, bounded, host-only and scoped to admi
  const otherBoard=(await call('room',host,undefined,{'x-workshop-id':id})).data.board;
  expect((await call('board',host,{expectedVersion:otherBoard.version,objects:[...otherBoard.objects,object]},{'x-workshop-id':id})).status).toBe(400);
  app.db.close();app=application({origin,hostPubkey:getPublicKey(hostKey),dataDir:dir,version:'reloaded'});const persisted=await app.handle(new Request(origin+'/api/v1/'+path,{headers:{cookie:b.cookie}}));expect(Buffer.from(await persisted.arrayBuffer()).toString('base64')).toBe(base64);
+});
+
+test('high-resolution Canvas images use the dedicated bounded request budget and persist exact bytes',async()=>{
+ const {host,b}=await setup(),bytes=png(2048,856,1_300_000),base64=bytes.toString('base64');expect(bytes.length).toBeGreaterThan(180_000);expect(bytes.length).toBeLessThanOrEqual(boardImageLimit);
+ const uploaded=await call('board/images',host,{base64});expect(uploaded.status).toBe(201);expect(uploaded.data).toMatchObject({mime:'image/png',width:2048,height:856,sha256:sha256(bytes)});
+ const fetched=await app.handle(new Request(origin+'/api/v1/board/images/'+uploaded.data.sha256,{headers:{cookie:b.cookie}}));expect(Buffer.from(await fetched.arrayBuffer())).toEqual(bytes);
+ app.db.close();app=application({origin,hostPubkey:getPublicKey(hostKey),dataDir:dir,version:'image-reload'});const reloaded=await app.handle(new Request(origin+'/api/v1/board/images/'+uploaded.data.sha256,{headers:{cookie:b.cookie}}));expect(Buffer.from(await reloaded.arrayBuffer())).toEqual(bytes);
+ const tooLarge=png(2048,856,boardImageLimit+1);expect((await call('board/images',host,{base64:tooLarge.toString('base64')})).status).toBe(413);
+ const oversizedBody=JSON.stringify({base64:'a'.repeat(limits.boardImageBodyBytes)}),response=await app.handle(new Request(origin+'/api/v1/board/images',{method:'POST',headers:{origin,cookie:host.cookie,'x-csrf-token':host.csrf,'content-type':'application/json'},body:oversizedBody}));expect(response.status).toBe(413);
 });
 
 test('font sizes and builtin donation placement retain server host validation and required layout objects',async()=>{

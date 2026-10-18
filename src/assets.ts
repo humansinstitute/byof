@@ -10,8 +10,8 @@ export class Assets {
     demand(source.includes("<html") && !source.includes("\0"), 400, "Expected a self-contained HTML app");
     return this.putBytes(new TextEncoder().encode(source));
   }
-  putBytes(source: Uint8Array): string {
-    demand(source.byteLength <= limits.sourceBytes, 413, "Asset exceeds capacity");
+  putBytes(source: Uint8Array, maxBytes=limits.sourceBytes): string {
+    demand(Number.isSafeInteger(maxBytes)&&maxBytes>0&&source.byteLength <= maxBytes, 413, "Asset exceeds capacity");
     const hash = sha256(source), path = join(this.root, hash), temporary = join(this.root, `.write-${crypto.randomUUID()}`);
     writeFileSync(temporary, source, { flag: "wx", mode: 0o600 });
     try { linkSync(temporary, path); } catch (error: any) { if (error.code !== "EEXIST") throw error; } finally { unlinkSync(temporary); }

@@ -2,7 +2,9 @@ import { sha256 } from './assets.ts';
 import type { Workshop } from './workshop.ts';
 import type { Member } from './auth.ts';
 import { demand } from './errors.ts';
-export const boardImageLimit=180000;
+import { limits } from './config.ts';
+export const boardImageLimit=limits.boardImageBytes;
+export const boardImageBase64Limit=Math.ceil(boardImageLimit/3)*4;
 export function installBoardImages(workshop:Workshop) {
   workshop.db.exec(`CREATE TABLE IF NOT EXISTS workshop_board_images(workshop_id TEXT NOT NULL,hash TEXT NOT NULL,mime TEXT NOT NULL,width INTEGER NOT NULL,height INTEGER NOT NULL,PRIMARY KEY(workshop_id,hash));`);
 }
@@ -24,13 +26,13 @@ export function rasterInfo(bytes:Uint8Array) {
 }
 export function uploadBoardImage(workshop:Workshop,member:Member,body:any) {
   workshop.host(member);workshop.admitted(member);
-  demand(body&&Object.keys(body).every(k=>k==='base64')&&typeof body.base64==='string'&&body.base64.length<=240000&&/^[A-Za-z0-9+/]+={0,2}$/.test(body.base64),400,'Invalid picture bytes');
-  const bytes=Buffer.from(body.base64,'base64');demand(bytes.length>0&&bytes.length<=boardImageLimit,413,'Picture exceeds 180 KB');demand(bytes.toString('base64')===body.base64,400,'Invalid picture encoding');
+  demand(body&&Object.keys(body).every(k=>k==='base64')&&typeof body.base64==='string'&&body.base64.length<=boardImageBase64Limit&&/^[A-Za-z0-9+/]+={0,2}$/.test(body.base64),400,'Invalid picture bytes');
+  const bytes=Buffer.from(body.base64,'base64');demand(bytes.length>0&&bytes.length<=boardImageLimit,413,'Picture exceeds 2 MB');demand(bytes.toString('base64')===body.base64,400,'Invalid picture encoding');
   const info=rasterInfo(bytes),hash=sha256(bytes);
   return workshop.db.transaction(()=>{
     const exists=workshop.db.query('SELECT hash FROM workshop_board_images WHERE workshop_id=? AND hash=?').get(workshop.id,hash);
     demand(exists||(workshop.db.query('SELECT count(*) n FROM workshop_board_images WHERE workshop_id=?').get(workshop.id) as any).n<200,409,'Workshop picture capacity reached');
-    workshop.assets.putBytes(bytes);
+    workshop.assets.putBytes(bytes,boardImageLimit);
     workshop.db.run('INSERT OR IGNORE INTO workshop_board_images VALUES(?,?,?,?,?)',[workshop.id,hash,info.mime,info.width,info.height]);
     return {src:`/api/v1/board/images/${hash}?workshop=${workshop.id}`,sha256:hash,...info};
   }).immediate();

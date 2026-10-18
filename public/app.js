@@ -10,6 +10,7 @@ import { temporaryIdentity, forgetTemporaryIdentity, browserProfileCache, humanT
 import { activityInstant, collapseActivity, newestInstant, perthEventTime } from './activity-time.js';
 import { invitationAtNavigation, invitationFreeUrl, invitationHistoryKey, invitationStorageKey, singleInvitationRedemption } from '/invitation-url.js';
 import {clipboardImages,imageMarkdown,imageUploadsBlockSend,insertImageMarkers,replaceImageMarker,submittedImageAttachments} from '/chat-attachments.js';
+import {prepareCanvasImage,blobBase64} from '/canvas-images.js';
 // Navigate before reading sessions, asking a signer, or sending any API request.
 // Keep credentials and signed challenges on the workshop's configured origin.
 const originResponse = await fetch('/api/v1/browser-origin', { credentials: 'omit', cache: 'no-store' });
@@ -473,18 +474,10 @@ function insertText(point) {
 }
 async function insertClipboardImage(blob) {
   const view=boardView(),point=view.imagePoint,scope=selectedWorkshop;if(!me.host||!point)throw Error('Choose a board position with the picture tool first.');
-  if(!['image/png','image/jpeg','image/webp'].includes(blob.type)||blob.size>10000000)throw Error('Use a PNG, JPEG or WebP picture under 10 MB.');
-  if(busy)throw Error('Wait for the current board operation.');startBusy();let decoded;try {
-    decoded=await createImageBitmap(blob);
-    if(decoded.width>16000||decoded.height>16000||decoded.width*decoded.height>40000000)throw Error('Picture dimensions exceed capacity.');
-    let ratio=Math.min(1,1200/Math.max(decoded.width,decoded.height)),data='';
-    for(let pass=0;pass<8;pass++){
-      const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(decoded.width*ratio));canvas.height=Math.max(1,Math.round(decoded.height*ratio));canvas.getContext('2d').drawImage(decoded,0,0,canvas.width,canvas.height);data=canvas.toDataURL('image/png').split(',')[1];if(data.length<=240000)break;ratio*=.75;
-    }
-    if(data.length>240000)throw Error('Picture exceeds capacity after resizing.');
-    const result=await api('board/images',{base64:data},undefined,scope);if(scope!==selectedWorkshop)return;
-    const width=Math.min(500,result.width),height=Math.max(100,width*result.height/result.width),draft=boardDraft();const id=crypto.randomUUID();draft.objects.push({id,kind:'image',x:point.x,y:point.y,width:Math.max(240,width),height:Math.min(4000,height),groupId:null,src:result.src,label:'Pasted BYOF Canvas picture'});draft.dirty=true;view.imagePoint=null;view.tool=null;view.focus=id;view.levels.set(id,++view.level);render();toast('Picture added. Save layout to share its position.');
-  } finally{decoded?.close();endBusy();if(scope===selectedWorkshop&&$('[data-board="save"]'))$('[data-board="save"]').disabled=!boardDraft().dirty;}
+  if(busy)throw Error('Wait for the current board operation.');startBusy();try {
+    const prepared=await prepareCanvasImage(blob),result=await api('board/images',{base64:await blobBase64(prepared.blob)},undefined,scope);if(scope!==selectedWorkshop)return;
+    const width=Math.min(500,result.width),height=Math.min(4000,width*result.height/result.width),draft=boardDraft();const id=crypto.randomUUID();draft.objects.push({id,kind:'image',x:point.x,y:point.y,width,height,groupId:null,src:result.src,label:'Pasted BYOF Canvas picture'});draft.dirty=true;view.imagePoint=null;view.tool=null;view.focus=id;view.levels.set(id,++view.level);render();toast('Picture added. Save layout to share its position.');
+  } finally{endBusy();if(scope===selectedWorkshop&&$('[data-board="save"]'))$('[data-board="save"]').disabled=!boardDraft().dirty;}
 }
 document.addEventListener('paste',event=>{
   if(screen!=='page'||!me?.host||!boardView().imagePoint||event.target.closest?.('input,textarea,[contenteditable]')||document.activeElement?.tagName==='IFRAME')return;
@@ -614,7 +607,7 @@ document.addEventListener('pointermove',event=>{
   const o=boardDraft().objects.find(o=>o.id===g.object.id);if(!o)return;
   if(g.mode==='arrow-start'||g.mode==='arrow-end'||g.mode==='arrow-curve'){const clamp=n=>Math.max(-4000,Math.min(4000,n));if(g.mode==='arrow-curve'){o.curveX=clamp((g.object.curveX??g.object.endX/2)+dx/view.scale);o.curveY=clamp((g.object.curveY??g.object.endY/2)+dy/view.scale);}else if(g.mode==='arrow-end'){o.endX=clamp(g.object.endX+dx/view.scale);o.endY=clamp(g.object.endY+dy/view.scale);}else{o.endX=clamp(g.object.endX-dx/view.scale);o.endY=clamp(g.object.endY-dy/view.scale);o.x=g.object.x+g.object.endX-o.endX;o.y=g.object.y+g.object.endY-o.endY;if(g.object.curveX!==undefined){o.curveX=clamp(g.object.x+g.object.curveX-o.x);o.curveY=clamp(g.object.y+g.object.curveY-o.y);}}o.width=Math.max(1,Math.abs(o.endX));o.height=Math.max(1,Math.abs(o.endY));}
   else if(g.mode==='move'){const delta=groupDelta(g.moving,dx/view.scale,dy/view.scale);for(const original of g.moving){const item=boardDraft().objects.find(c=>c.id===original.id);if(item){item.x=original.x+delta.x;item.y=original.y+delta.y;}}}
-  else {o.width=Math.max(240,Math.min(4000,g.object.width+dx/view.scale));o.height=Math.max(o.kind==='napplet'?200:100,Math.min(4000,g.object.height+dy/view.scale));}
+  else {o.width=Math.max(o.kind==='image'?1:240,Math.min(4000,g.object.width+dx/view.scale));o.height=Math.max(o.kind==='image'?1:o.kind==='napplet'?200:100,Math.min(4000,g.object.height+dy/view.scale));}
   dirtyBoard();syncBoardDOM();
 });
 function endBoardGesture(event){if(!boardPointers.has(event.pointerId))return;boardPointers.delete(event.pointerId);if(boardGesture?.mode==='pinch'&&boardPointers.size===1){const [pointer,p]=[...boardPointers.entries()][0];const view=boardView();boardGesture={mode:'pan',pointer,start:p,x:view.x,y:view.y};}else if(!boardPointers.size){if(boardGesture?.mode?.startsWith('arrow-')){const o=boardDraft().objects.find(o=>o.id===boardGesture.object.id);if(o&&Math.hypot(o.endX,o.endY)<8){boardDraft().objects=boardDraft().objects.filter(c=>c.id!==o.id);$(`[data-object="${o.id}"]`)?.remove();}}boardGesture=null;const overlay=$('.board-selection-box');if(overlay)overlay.hidden=true;boardView().drawing=false;syncBoardTools();$('.board-viewport')?.classList.remove('arranging');}}

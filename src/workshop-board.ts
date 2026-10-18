@@ -39,7 +39,7 @@ function validateObject(value:any,active:Set<string>,workshop:Workshop):BoardObj
   demand(typeof value.id==='string'&&/^[a-zA-Z0-9-]{1,80}$/.test(value.id),400,'Invalid object ID');
   demand(['napplet','text','image','group','donation','arrow'].includes(value.kind),400,'Invalid object kind');
   for(const key of ['x','y','width','height'])demand(typeof value[key]==='number'&&Number.isFinite(value[key]),400,'Invalid geometry');
-  demand(Math.abs(value.x)<=50000&&Math.abs(value.y)<=50000&&value.width>=(value.kind==='arrow'?1:240)&&value.width<=4000&&value.height>=(value.kind==='arrow'?1:value.kind==='napplet'?200:100)&&value.height<=4000,400,'Board geometry is out of bounds');
+  demand(Math.abs(value.x)<=50000&&Math.abs(value.y)<=50000&&value.width>=(['arrow','image'].includes(value.kind)?1:240)&&value.width<=4000&&value.height>=(['arrow','image'].includes(value.kind)?1:value.kind==='napplet'?200:100)&&value.height<=4000,400,'Board geometry is out of bounds');
   demand(value.groupId===null||typeof value.groupId==='string',400,'Invalid group');
   const o:BoardObject={id:value.id,kind:value.kind,x:value.x,y:value.y,width:value.width,height:value.height,groupId:value.groupId};
   if(o.kind==='napplet'){demand(value.projectId===o.id&&active.has(value.projectId),400,'Active Napplet required');o.projectId=value.projectId;}
