@@ -80,10 +80,12 @@ test("Pong starts stationary with documented keyboard and discrete touch control
   expect(source).toContain('event.key==="ArrowUp"||event.key==="ArrowDown"');
   expect(source).toContain('if(event.code==="Space")');
   expect(source).toContain('event.key==="r"||event.key==="R"');
-  expect(source).toContain('event.pointerType==="touch"');
+  expect(source).toContain('event.pointerType!=="touch"');
   expect(source).toContain('event.clientY<rect.top+rect.height/2?-1:1');
   expect(source).toContain('document.querySelector("#restart").onclick=restart');
-  expect(source).toContain('canvas.addEventListener("pointermove"');
+  expect(source).toContain('if(event.pointerType!=="touch")return');
+  expect(source).not.toContain('canvas.addEventListener("pointermove"');
+  expect(source).not.toContain('event.pointerType==="mouse"');
   expect(source).toContain("touch-action:none");
   expect(source).not.toMatch(/lightning|invoice|donat|payment|settlement|unlock|walletofsatoshi|fetch\(/i);
 });

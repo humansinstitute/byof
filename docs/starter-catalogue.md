@@ -28,12 +28,13 @@ preferable.
 
 ## Existing Pong projects
 
-Startup upgrades the original Pong release only when the project has its exact
-original source hash, catalogue title and description, original non-forked
-lineage, and exactly one untouched revision. The upgrade appends the corrected
-controls as revision 2 and retains the original immutable revision. Repeated
-startup is idempotent.
+Startup upgrades either known untouched built-in Pong release only when the
+project has the exact built-in source hash, catalogue title and description,
+and original non-forked lineage. This includes a single-revision project made
+from either release and the exact two-revision automatic upgrade from the
+original release. The upgrade appends the keyboard-and-touch-only controls as
+the next immutable revision. Repeated startup is idempotent.
 
-Renamed, redescribed, edited, restored, deleted, forked and multi-revision Pong
-projects are never rewritten. Their owners can opt into the newer controls
-through the normal builder and revision workflow.
+Renamed, redescribed, edited, restored, deleted, forked and other
+multi-revision Pong projects are never rewritten. Their owners can opt into the
+newer controls through the normal builder and revision workflow.
