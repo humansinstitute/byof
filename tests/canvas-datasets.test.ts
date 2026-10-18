@@ -61,9 +61,10 @@ test('actual Freedom backend requires current member, exact bridge/Canvas/sessio
   await call('logout',{},a);expect((await call('napplet/dataset',{token:ta,method:'get',handle:ha,key:'x'},a)).status).toBe(401);
  }finally{app.db.close();rmSync(dir,{recursive:true,force:true});}
 });
-test('builder and bridge contracts require discovery, explicit permissions and preserve tool publication/prose',async()=>{
- expect(canvasDatasetContract).toContain('REQUIRE inspecting');expect(canvasDatasetContract).toContain('never private values');expect(nappletExecutionContract).toContain('final messages remain ordinary prose');
- const skill=await Bun.file('templates/napplet-build/SKILL.md').text();expect(skill).toContain('canvasDatasets');expect(skill).toContain('Never treat a missing/unavailable snapshot');
+test('builder and bridge contracts require discovery, automatic shared access, private confirmation and preserve tool publication/prose',async()=>{
+ expect(canvasDatasetContract).toContain('REQUIRE inspecting');expect(canvasDatasetContract).toContain('never private values');expect(canvasDatasetContract).toContain('shared datasets open automatically');expect(canvasDatasetContract).toContain('private datasets require explicit host confirmation');expect(canvasDatasetContract).toContain('not a persistent grant');expect(nappletExecutionContract).toContain('final messages remain ordinary prose');
+ const skill=await Bun.file('templates/napplet-build/SKILL.md').text();expect(skill).toContain('canvasDatasets');expect(skill).toContain('Never treat a missing/unavailable snapshot');expect(skill).toContain('shared Canvas datasets open automatically');expect(skill).toContain('private datasets require explicit host confirmation');
+ const bridgeDoc=await Bun.file('docs/napplet-bridge-api.md').text();expect(bridgeDoc).toContain('A `shared` dataset opens automatically');expect(bridgeDoc).toContain('a `private` dataset requests inspectable host confirmation');expect(bridgeDoc).toContain('does not create a persistent grant');
  const client=await Bun.file('templates/napplet-client.js').text();expect(client).toContain('openDataset');
  const app=await Bun.file('public/app.js').text();expect(app).toContain("button('workshops','Canvases')");expect(app).toContain('Create Canvas');expect(app).toContain("api('site/workshops'");
 });

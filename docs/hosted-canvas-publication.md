@@ -31,8 +31,9 @@ Published Napplets keep the existing opaque-origin sandbox and injected
 `window.napplet` client. An anonymous parent supplies capability discovery and an
 explicit `AUTH_REQUIRED` result for identity-backed methods. If the browser has a
 real active Freedom Tools Nostr session and is admitted to that Canvas, the parent
-uses the existing bridge host, consent UI and server-side workshop/project/session
-checks. The child never receives the session cookie, CSRF value, service
+uses the existing bridge host and server-side workshop/project/session checks.
+Shared Canvas datasets open automatically; private datasets and sensitive
+capabilities retain the host consent UI. The child never receives the session cookie, CSRF value, service
 credential, workshop-host role or server capability.
 
 Self-contained HTML continues to work anonymously. Identity, durable storage,

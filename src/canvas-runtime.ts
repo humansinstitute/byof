@@ -60,7 +60,7 @@ export class CanvasRuntime {
  const g=this.grants.get(body.handle);
  demand(g&&g.token===body.token&&g.sessionHash===sessionHash&&g.user===member.pubkey&&g.canvas===workshop.id,403,'Dataset grant missing or mismatched');
  if(body.method==='close'){this.revoke(body.handle);return {ok:true};}
- demand(g.destination===JSON.stringify([store.scope.installationId,store.scope.target]),403,'Dataset destination changed; reopen with consent');
+ demand(g.destination===JSON.stringify([store.scope.installationId,store.scope.target]),403,'Dataset destination changed; reopen the dataset');
  let result;
  if(body.method==='get')result=await store.get(g.binding,body.key);
  else if(body.method==='list')result={records:store.records(await store.list(g.binding))};

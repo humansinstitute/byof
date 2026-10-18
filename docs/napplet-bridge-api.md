@@ -313,13 +313,15 @@ a real isolated backend and synthetic identities; evidence remains under ignored
 
 ## Canvas datasets
 
-`await napplet.datasets.open({name,visibility})` requests inspectable host consent
-for a named `shared` or `private` dataset on the current Canvas. Creation also
-requires `description` and `fields: {fieldName: 'type and meaning'}`. Equivalent
+`await napplet.datasets.open({name,visibility})` opens a named dataset on the
+current Canvas. A `shared` dataset opens automatically for an authenticated
+Canvas member; a `private` dataset requests inspectable host confirmation.
+Creation also requires `description` and `fields: {fieldName: 'type and meaning'}`. Equivalent
 field order is accepted; incompatible descriptions produce `CONFLICT`.
 Shared access requires a current authenticated Canvas member. Private access
 also requires the authenticated owner. Neither identity nor destination can be
-chosen by the child. Closing the frame/token/session revokes its dataset grants.
+chosen by the child. Closing the handle/frame/token/session revokes active
+dataset access; automatic shared open does not create a persistent grant.
 
 The returned handle provides `get(key)`, `list()`,
 `set(key, object, expectedVersion)`, `remove(key, expectedVersion)`, `watch(...)`

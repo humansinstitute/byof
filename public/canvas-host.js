@@ -9,7 +9,7 @@ export function canvasDomain({context,backend,ask,assert,error,close}) {
   if(action==='open'){
    if(Object.keys(p).length!==1||!p.dataset||Object.keys(p.dataset).some(k=>!['name','visibility','description','fields'].includes(k))||!/^[a-z][a-z0-9_-]{0,63}$/.test(p.dataset.name)||!['shared','private'].includes(p.dataset.visibility))throw error('INVALID','Supply a named shared/private dataset');
    if(b.datasets.size>=4)throw error('QUOTA','At most four datasets per Napplet');
-   await ask(b,'dataset',p.dataset,signal);assert(b);
+   if(p.dataset.visibility==='private'){await ask(b,'dataset',p.dataset,signal);assert(b);}
    const opened=await backend(b,'dataset',{token:b.token,method:'open',dataset:p.dataset},signal);b.datasets.set(opened.handle,opened.binding);return opened;
   }
   const allowed=action==='set'?['handle','key','value','expectedVersion']:action==='remove'?['handle','key','expectedVersion']:action==='get'?['handle','key']:['handle'];
