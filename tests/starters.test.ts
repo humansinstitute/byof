@@ -18,6 +18,15 @@ test("catalogue contains the Simple website followed by Pete's existing starters
   }
 });
 
+test("catalogue derives its visible count and renders icon labels as text", async () => {
+  const source = await Bun.file(new URL("../public/app.js", import.meta.url)).text();
+  expect(source).toContain("state.starters.length} workshop Napplet${state.starters.length===1?'':'s'}");
+  expect(source).not.toContain("Choose one of five workshop Napplets");
+  expect(source).toContain('<div class="art">${esc(s.icon)}</div>');
+  expect(source).not.toContain('<div class="art">${s.icon}</div>');
+  expect(byId("website").icon).toBe("<>");
+});
+
 test("Simple website is a minimal responsive dependency-free Hello world document", () => {
   const starter = byId("website"), source = starter.source;
   expect(starter.title).toBe("Simple website");

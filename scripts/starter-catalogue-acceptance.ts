@@ -47,8 +47,11 @@ async function openStarter(width: number, height: number, index: number) {
   await expect(page.getByRole("heading", { name: "Canvases" })).toBeVisible();
   await page.getByRole("button", { name: "Open Canvas" }).first().click();
   await page.getByRole("button", { name: "New Napplet" }).click();
+  await expect(page.getByText(`Choose one of ${starters.length} workshop Napplets, then make it your own.`, { exact: true })).toBeVisible();
+  await expect(page.locator(".starter")).toHaveCount(starters.length);
   const card = page.locator(".starter").filter({ has: page.getByRole("heading", { name: starter.title, exact: true }) });
   await expect(card).toBeVisible();
+  if (starter.title === "Simple website") await expect(card.locator(".art")).toHaveText("<>");
   await card.getByRole("button", { name: "Use this starter →" }).click();
   const frame = page.frameLocator("iframe[data-napplet]");
   await expect(frame.getByRole("heading", { name: starter.heading, exact: true })).toBeVisible({ timeout: 15000 });
