@@ -239,6 +239,23 @@ cap deliberately bounds guesses from newly created identities, so heavy invalid
 traffic can temporarily prevent other code redemptions. Existing membership and
 ordinary sign-in remain available.
 
+Each Canvas has at most one active six-digit shared invitation. The host chooses
+an admission limit from 1 through 50, and host-only reads return the same code,
+canonical URL and QR with used and remaining counts until it is stopped or
+exhausted. Redemption and stopping are immediate SQLite transactions: a final
+redemption either commits before the stop and admits that participant, or the
+stop commits first and rejects it. Stopping never changes existing membership.
+
+The six-digit value is retained in the invitation row so an authorized host can
+redisplay it after reload. This does not materially weaken its at-rest resistance:
+the existing hash has only one million possible inputs and is already enumerable
+offline. Long invitation tokens remain hash-only and never enter the redisplay
+column. API responses expose shared values only after scoped host authorization;
+participants and hosts of other Canvases cannot read them. Additive migration
+preserves historical rows, records their original remaining count, and explicitly
+marks previously usable non-redisplayable rows stopped (or exhausted when empty),
+so old state is never silently revived.
+
 ## Donation QR
 
 Revealed donation details include a local QR encoding the exact `lightning:` URI
@@ -253,5 +270,7 @@ Validation adds `bun scripts/workshop-invite-acceptance.ts` and
 GIF image pixels and compare them to the displayed invitation URL or wallet href
 at desktop/mobile sizes. Join coverage includes temporary/extension identities,
 manual and both link formats, pending membership, invalid-code recovery, reload
-and UI/API authority checks. API tests exercise limits, collisions, restart,
-expiry, exhaustion, atomic use and bans. No wallet is opened or payment sent.
+and UI/API authority checks. API tests exercise the 1/50 limits, one-active
+enforcement, redisplay, remaining counts, replacement, manual stop/final-use
+races, legacy migration, collisions, restart, expiry, exhaustion, atomic use and
+bans. No wallet is opened or payment sent.

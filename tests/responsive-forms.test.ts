@@ -4,7 +4,7 @@ const app=await Bun.file(new URL('../public/app.js',import.meta.url)).text();
 const css=await Bun.file(new URL('../public/style.css',import.meta.url)).text();
 
 test('invitation dialog keeps the Canvas Code between QR and selectable URL',()=>{
- const invite=app.match(/if \(action === 'invite'\)[^\n]+/)![0];
+ const invite=app.match(/function activeInvitation\(invitation,opener=null\)\{[\s\S]*?\n\}/)![0];
  expect(invite).toContain('<span>Canvas Code</span>');
  expect(invite).not.toContain('BYOF Canvas code');
  expect(invite.indexOf('id="invite-qr"')).toBeLessThan(invite.indexOf('id="invite-code"'));
@@ -13,8 +13,17 @@ test('invitation dialog keeps the Canvas Code between QR and selectable URL',()=
  expect(invite).toContain('readonly');
  expect(invite).toContain('class="field-action"');
  expect(invite).toContain('role="status" aria-live="polite"');
- expect(invite).toContain('This code does not expire. It can admit up to 10 people.');
+ expect(invite).toContain('does not expire automatically');
+ expect(invite).toContain('Stop admitting');
+ expect(invite).toContain('People already admitted keep access');
  expect(invite).not.toContain('24 hours');
+});
+test('invitation setup has bounded accessible quantity and honest lifecycle states',()=>{
+ const setup=app.match(/function invitationSetup\(latest,opener=null\)\{[\s\S]*?\n\}/)![0];
+ expect(setup).toContain('id="invitation-limit" type="number" min="1" max="50" step="1"');
+ expect(setup).toContain('Allow up to 10 new people');
+ expect(app).toContain("latest.status==='exhausted'");
+ expect(app).toContain('People who already joined still have access');
 });
 test('copy feedback covers success and manual-copy recovery',()=>{
  const copy=app.match(/if\(action==='copy-invite-url'\)\{[\s\S]*?\n    \}/)![0];

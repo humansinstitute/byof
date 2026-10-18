@@ -49,6 +49,15 @@ export function installSite(db: Database, config: Config) {
         }
         db.run(`UPDATE ${table} SET workshop_id=? WHERE workshop_id IS NULL`, [legacy]);
     }
+    const invitationColumns = db.query('PRAGMA table_info(invitations)').all() as {name:string}[];
+    if (!invitationColumns.some(c => c.name === 'initial_uses')) db.exec('ALTER TABLE invitations ADD COLUMN initial_uses INTEGER');
+    if (!invitationColumns.some(c => c.name === 'status')) db.exec('ALTER TABLE invitations ADD COLUMN status TEXT');
+    if (!invitationColumns.some(c => c.name === 'code')) db.exec('ALTER TABLE invitations ADD COLUMN code TEXT');
+    if (!invitationColumns.some(c => c.name === 'created_at')) db.exec('ALTER TABLE invitations ADD COLUMN created_at INTEGER');
+    if (!invitationColumns.some(c => c.name === 'stopped_at')) db.exec('ALTER TABLE invitations ADD COLUMN stopped_at INTEGER');
+    db.exec(`UPDATE invitations SET initial_uses=remaining WHERE initial_uses IS NULL;
+      UPDATE invitations SET status=CASE WHEN remaining>0 THEN 'stopped' ELSE 'exhausted' END WHERE status IS NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS one_active_shared_invitation ON invitations(workshop_id) WHERE status='active' AND code IS NOT NULL;`);
     if (config.storage) {
         db.run('INSERT OR IGNORE INTO towers VALUES(?,?,?,?)', ['legacy-managed', 'Managed Tower', config.storage.towerOrigin, now()]);
         const tower = db.query('SELECT id FROM towers WHERE origin=?').get(config.storage.towerOrigin) as any;

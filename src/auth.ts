@@ -38,7 +38,7 @@ export class Auth {
         const room = this.db.query("SELECT admission FROM room WHERE id=1").get() as any;
         let admitted = host || room.admission === "open";
         if (!admitted && invitation) {
-          const used = this.db.run("UPDATE invitations SET remaining=remaining-1 WHERE hash=? AND workshop_id=(SELECT workshop_id FROM workshop_identity WHERE id=1) AND remaining>0", [sha256(text(invitation, "Invitation", 200))]);
+          const used = this.db.run("UPDATE invitations SET remaining=remaining-1,status=CASE WHEN remaining=1 THEN 'exhausted' ELSE status END WHERE hash=? AND workshop_id=(SELECT workshop_id FROM workshop_identity WHERE id=1) AND status='active' AND remaining>0", [sha256(text(invitation, "Invitation", 200))]);
           demand(used.changes === 1, 403, "Invitation is invalid or exhausted"); admitted = true;
         }
         this.db.run("INSERT INTO members(pubkey,name,identity_type,state,created_at) VALUES(?,?,?,?,?)", [event.pubkey, text(body.name || 'Workshop participant', "Display name", 60), body.identityType, admitted ? "admitted" : "pending", now()]);

@@ -58,7 +58,7 @@ test('pre-workshop SQLite schema migrates additively without changing legacy row
     expect(app.site.legacy()).toBe(legacy);
     expect(app.db.query('SELECT state,allowance,name FROM members WHERE pubkey=?').get(pubkey)).toEqual({ state: 'banned', allowance: 7, name: 'Legacy name' });
     expect(app.db.query('SELECT * FROM room').get()).toEqual({ id: 1, title: 'Legacy title', introduction: 'Legacy introduction', lightning: '', support_label: 'Support this workshop', paused: 1, admission: 'invitation' });
-    expect((app.db.query('SELECT * FROM invitations').get() as any).workshop_id).toBe(legacy);
+    expect(app.db.query('SELECT workshop_id,remaining,initial_uses,status,code FROM invitations').get()).toEqual({workshop_id:legacy,remaining:4,initial_uses:4,status:'stopped',code:null});
     expect((app.db.query('SELECT * FROM moderation').get() as any).workshop_id).toBe(legacy);
     const after = app.db.query('SELECT * FROM storage_binding').get() as any;
     expect(after.target_json).toBe(binding[3]);

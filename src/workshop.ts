@@ -45,7 +45,14 @@ export class Workshop {
       const previous=this.membership(member.pubkey);demand(previous?.state!=='banned',403,'Access removed for this workshop');
       if(previous?.state==='admitted')return this.scoped(member);
       const room=this.roomRow();let admitted=member.host||room.admission==='open';
-      if(body.invitation){const used=this.db.run('UPDATE invitations SET remaining=remaining-1 WHERE hash=? AND workshop_id=? AND remaining>0',[sha256(text(body.invitation,'Invitation',200)),this.id]);demand(used.changes===1,403,'Invitation is invalid or exhausted');admitted=true;}
+      if(body.invitation){
+        const invitation=this.db.query('SELECT status,remaining FROM invitations WHERE hash=? AND workshop_id=?').get(sha256(text(body.invitation,'Invitation',200)),this.id) as any;
+        demand(invitation,403,'Invitation is invalid');
+        demand(invitation.status!=='stopped',410,'Invitation has been stopped');
+        demand(invitation.status==='active'&&invitation.remaining>0,410,'Invitation is exhausted');
+        const used=this.db.run("UPDATE invitations SET remaining=remaining-1,status=CASE WHEN remaining=1 THEN 'exhausted' ELSE status END WHERE hash=? AND workshop_id=? AND status='active' AND remaining>0",[sha256(body.invitation.trim()),this.id]);
+        demand(used.changes===1,410,'Invitation is no longer admitting people');admitted=true;
+      }
       if(previous){if(admitted){if(this.legacy)this.db.run("UPDATE members SET state='admitted' WHERE pubkey=?",[member.pubkey]);else this.db.run("UPDATE workshop_members SET state='admitted' WHERE workshop_id=? AND pubkey=?",[this.id,member.pubkey]);}}
       else {demand(!this.legacy,409,'Legacy membership is created at sign-in');demand((this.db.query('SELECT count(*) n FROM workshop_members WHERE workshop_id=?').get(this.id) as any).n<limits.participants,409,'Workshop capacity reached');this.db.run('INSERT INTO workshop_members VALUES(?,?,?,?,?)',[this.id,member.pubkey,admitted?'admitted':'pending',20,now()]);}
       return this.scoped(member);
@@ -274,10 +281,32 @@ export class Workshop {
     this.host(member);demand(Number.isInteger(body.uses)&&body.uses>0&&body.uses<=50,400,'Invitation uses must be 1–50');
     demand(body.shortCode===undefined||typeof body.shortCode==='boolean',400,'Invalid invitation type');
     return this.db.transaction(()=>{
-      demand((this.db.query('SELECT count(*) n FROM invitations WHERE workshop_id=? AND remaining>0').get(this.id) as any).n<100,429,'Workshop invitation capacity reached');
+      if(body.shortCode)demand(!this.db.query("SELECT hash FROM invitations WHERE workshop_id=? AND status='active' AND code IS NOT NULL AND remaining>0").get(this.id),409,'A shared invitation is already active');
       const token=body.shortCode?newJoinCode(this.db):`${crypto.randomUUID()}${crypto.randomUUID()}`;
-      this.db.run('INSERT INTO invitations(hash,remaining,expires_at,workshop_id) VALUES(?,?,0,?)',[sha256(token),body.uses,this.id]);
-      return {token,...(body.shortCode?{code:token}:{}),uses:body.uses};
+      // Six-digit values are retained only for authorized host redisplay. Their
+      // hashes have the same enumerable one-million-value offline search space;
+      // long tokens remain hash-only and are never written to the code column.
+      this.db.run('INSERT INTO invitations(hash,remaining,expires_at,workshop_id,initial_uses,status,code,created_at) VALUES(?,?,0,?,?,?,?,?)',[sha256(token),body.uses,this.id,body.uses,'active',body.shortCode?token:null,now()]);
+      return {token,...(body.shortCode?{code:token,status:'active',limit:body.uses,remaining:body.uses,used:0}:{}),uses:body.uses};
+    }).immediate();
+  }
+  sharedInvitation(member:Member) {
+    this.host(member);
+    return this.db.transaction(()=>{
+      this.db.run("UPDATE invitations SET status='exhausted' WHERE workshop_id=? AND code IS NOT NULL AND status='active' AND remaining<=0",[this.id]);
+      const active=this.db.query("SELECT code,status,initial_uses,remaining,created_at,stopped_at FROM invitations WHERE workshop_id=? AND code IS NOT NULL AND status='active' AND remaining>0 ORDER BY created_at DESC,rowid DESC LIMIT 1").get(this.id) as any;
+      const latest=active||this.db.query("SELECT code,status,initial_uses,remaining,created_at,stopped_at FROM invitations WHERE workshop_id=? AND code IS NOT NULL ORDER BY created_at DESC,rowid DESC LIMIT 1").get(this.id) as any;
+      const summary=(row:any,includeCode=false)=>row?{...(includeCode?{code:row.code}:{}),status:row.status,limit:row.initial_uses,remaining:row.remaining,used:row.initial_uses-row.remaining,createdAt:row.created_at,stoppedAt:row.stopped_at}:null;
+      return {active:summary(active,true),latest:summary(latest,!!active)};
+    }).immediate();
+  }
+  stopInvitation(member:Member) {
+    this.host(member);
+    return this.db.transaction(()=>{
+      const stopped=this.db.run("UPDATE invitations SET status='stopped',stopped_at=? WHERE workshop_id=? AND code IS NOT NULL AND status='active' AND remaining>0",[now(),this.id]);
+      demand(stopped.changes===1,409,'No active shared invitation to stop');
+      const latest=this.db.query("SELECT status,initial_uses,remaining,created_at,stopped_at FROM invitations WHERE workshop_id=? AND code IS NOT NULL ORDER BY created_at DESC,rowid DESC LIMIT 1").get(this.id) as any;
+      return {active:null,latest:{status:latest.status,limit:latest.initial_uses,remaining:latest.remaining,used:latest.initial_uses-latest.remaining,createdAt:latest.created_at,stoppedAt:latest.stopped_at}};
     }).immediate();
   }
   previewRevision(member: Member, id: string, revisionId: string) {

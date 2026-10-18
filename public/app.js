@@ -196,6 +196,17 @@ $('#dialog').addEventListener('cancel',event=>{if(canvasSetup){event.preventDefa
 $('#dialog').addEventListener('close', () => { if(canvasSetup)canvasSetup=null;$('#dialog').className='';$('#dialog').removeAttribute('aria-labelledby');if (dialogOpener?.isConnected && !activeViewer) dialogOpener.focus(); dialogOpener = null; });
 $('#dialog').addEventListener('click',event=>{const modal=$('#dialog'),rect=modal.getBoundingClientRect();if(event.target===modal&&(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom))modal.close();});
 function dialog(html,opener=null,topClose=false) { if (!$('#dialog').open) dialogOpener=opener||document.activeElement;const modal=$('#dialog');modal.className=topClose?'app-dialog napplet-action-modal':'app-dialog';modal.innerHTML=(topClose?'<button type="button" class="dialog-close" data-a="close" aria-label="Close Napplet actions">[x]</button>':'')+html+(topClose?'':'<div class="actions dialog-actions"><button data-a="close">Close</button></div>');const heading=modal.querySelector('h1,h2');if(heading){heading.id='dialog-title';modal.setAttribute('aria-labelledby',heading.id);}else modal.removeAttribute('aria-labelledby');modal.showModal();if(topClose)queueMicrotask(()=>modal.querySelector('.napplet-owner-actions button,input,form button')?.focus()); }
+function invitationStatus(latest){
+ if(!latest)return '';
+ const message=latest.status==='exhausted'?`The previous invitation admitted all ${latest.limit} people and is exhausted.`:'The previous invitation was stopped. People who already joined still have access.';
+ return `<p class="invite-state ${latest.status}" role="status">${message}</p>`;
+}
+function invitationSetup(latest,opener=null){
+ dialog(`<h2>Invite to ${esc(state.room.title)}</h2>${invitationStatus(latest)}<p>Create one shared Canvas Code for a chosen number of new participants. It does not expire automatically.</p><form id="invitation-form"><label for="invitation-limit">How many new people may join?</label><input id="invitation-limit" type="number" min="1" max="50" step="1" value="10" required aria-describedby="invitation-limit-help"><p id="invitation-limit-help" class="muted">Allow up to 10 new people. Choose any whole number from 1 to 50.</p><button class="primary" type="submit">Start admitting</button></form>`,opener);
+}
+function activeInvitation(invitation,opener=null){
+ dialog(`<h2>Invite to ${esc(state.room.title)}</h2><p>This shared invitation does not expire automatically.</p><dl class="invite-usage"><div><dt>Admission limit</dt><dd>${invitation.limit}</dd></div><div><dt>Used</dt><dd>${invitation.used}</dd></div><div><dt>Remaining</dt><dd>${invitation.remaining}</dd></div></dl><img id="invite-qr" class="invite-qr" src="${esc(invitation.qr)}" alt="BYOF Canvas invitation QR code"><div class="invite-code"><span>Canvas Code</span><strong id="invite-code">${esc(invitation.code)}</strong></div><label for="invite-url">Invitation URL</label><div class="field-action"><textarea id="invite-url" rows="2" readonly spellcheck="false">${esc(invitation.url)}</textarea><button type="button" data-a="copy-invite-url" aria-describedby="invite-copy-feedback">Copy invitation URL</button></div><p id="invite-copy-feedback" class="copy-feedback" role="status" aria-live="polite"></p><div class="invite-stop"><p>Stopping blocks future joins through this code, URL and QR. People already admitted keep access.</p><button type="button" class="danger" data-a="stop-invitation">Stop admitting</button></div>`,opener);
+}
 const button = (action, label, id = '', className = '') => `<button data-a="${action}" data-id="${esc(id)}" class="${className}">${label}</button>`;
 const back = () => button('page', '← BYOF Canvas page', '', 'back');
 let reconnectTimer=null, reconnectDelay=500, subscribedRequest='';
@@ -1169,7 +1180,9 @@ document.addEventListener('click', async event => {
     if (action === 'ban-confirm') { await memberAction(id,'banned'); $('#dialog').close(); }
     if (action === 'allowance') { const m = people.members.find(m => m.pubkey === id); dialog(`<h2>Build allowance for <span data-profile-name="${esc(m.pubkey)}">${esc(profileName(m))}</span></h2><label for="allowance">Instructions allowed (0–100)</label><input id="allowance" type="number" min="0" max="100" value="${m.allowance}">` + button('allowance-save','Save allowance',id)); }
     if (action === 'allowance-save') { const m = people.members.find(m => m.pubkey === id); await memberAction(id,m.state,Number($('#allowance').value)); $('#dialog').close(); }
-    if (action === 'invite') { const invitation = await api('host/invitations',{uses:10,shortCode:true}); dialog(`<h2>Invite to ${esc(state.room.title)}</h2><p>This code does not expire. It can admit up to 10 people.</p><img id="invite-qr" class="invite-qr" src="${esc(invitation.qr)}" alt="BYOF Canvas invitation QR code"><div class="invite-code"><span>Canvas Code</span><strong id="invite-code">${esc(invitation.code)}</strong></div><label for="invite-url">Invitation URL</label><div class="field-action"><textarea id="invite-url" rows="2" readonly spellcheck="false">${esc(invitation.url)}</textarea><button type="button" data-a="copy-invite-url" aria-describedby="invite-copy-feedback">Copy invitation URL</button></div><p id="invite-copy-feedback" class="copy-feedback" role="status" aria-live="polite"></p>`,target); }
+    if (action === 'invite') { const invitations=await api('host/invitations');if(invitations.active)activeInvitation(invitations.active,target);else invitationSetup(invitations.latest,target); }
+    if(action==='stop-invitation')dialog(`<h2>Stop admitting new people?</h2><p>This immediately disables the current code, URL and QR. People who already joined keep their Canvas access.</p><button type="button" class="danger" data-a="stop-invitation-confirm">Stop admitting</button>`,target);
+    if(action==='stop-invitation-confirm'){const invitations=await api('host/invitations/stop',{});invitationSetup(invitations.latest);toast('Invitation stopped. Existing participants keep access.');}
     if(action==='copy-invite-url'){
       const feedback=$('#invite-copy-feedback');
       try{await navigator.clipboard.writeText($('#invite-url').value);feedback.className='copy-feedback success';feedback.textContent='Invitation URL copied.';toast('Invitation URL copied');}
@@ -1181,6 +1194,11 @@ document.addEventListener('click', async event => {
 document.addEventListener('submit', async event => {
   event.preventDefault(); if (busy) return; startBusy();
   try {
+    if(event.target.id==='invitation-form'){
+      const limit=Number($('#invitation-limit').value);
+      if(!Number.isInteger(limit)||limit<1||limit>50)throw Error('Choose a whole number from 1 to 50');
+      activeInvitation(await api('host/invitations',{uses:limit,shortCode:true}));toast(`Shared invitation can admit up to ${limit} new people.`);
+    }
     if(event.target.id==='request-engine-correction-form'){const id=event.target.dataset.id;await api(`host/projects/${detail.project.id}/requests/${id}/builder-engine`,{reason:$('#engine-correction-reason').value,expectedRequestRevision:Number($('#engine-correction-request-revision').value),expectedCanvasRevision:Number($('#engine-correction-canvas-revision').value)});$('#dialog').close();await openProject(detail.project.id);toast('Saved request now uses the current Canvas builder');}
     if (event.target.id === 'rename-form') {
       const id = event.target.dataset.id;
@@ -1267,7 +1285,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&menu){menu=false;re
 document.addEventListener('click',e=>{if(menu&&!e.composedPath().includes($('#identity'))){menu=false;render();}});
 document.addEventListener('error',e=>{if(e.target instanceof HTMLImageElement){const avatar=e.target.closest('.avatar');if(avatar)avatar.textContent=me?initials(profileName(me)):'WP';else e.target.hidden=true;}},true);
 
-document.addEventListener('input',event=>{if(event.target.id==='workshop-code'&&screen==='start')rememberJoinCode(event.target.value);if(event.target.closest('#profile-form'))$('#profile-form').dataset.dirty='true';if(event.target.id==='canvas-delete-confirm'){const submit=$('#canvas-delete-submit');submit.disabled=event.target.value!=='CONFIRM';$('#canvas-delete-error').hidden=true;}if(event.target.id==='napplet-delete-confirm'){const submit=$('#napplet-delete-submit'),form=event.target.form;submit.disabled=event.target.value!==form.dataset.title;$('#napplet-delete-error').hidden=true;}});
+document.addEventListener('input',event=>{if(event.target.id==='workshop-code'&&screen==='start')rememberJoinCode(event.target.value);if(event.target.id==='invitation-limit'){const value=Number(event.target.value),help=$('#invitation-limit-help');help.textContent=Number.isInteger(value)&&value>=1&&value<=50?`Allow up to ${value} new ${value===1?'person':'people'}.`:'Choose a whole number from 1 to 50.';}if(event.target.closest('#profile-form'))$('#profile-form').dataset.dirty='true';if(event.target.id==='canvas-delete-confirm'){const submit=$('#canvas-delete-submit');submit.disabled=event.target.value!=='CONFIRM';$('#canvas-delete-error').hidden=true;}if(event.target.id==='napplet-delete-confirm'){const submit=$('#napplet-delete-submit'),form=event.target.form;submit.disabled=event.target.value!==form.dataset.title;$('#napplet-delete-error').hidden=true;}});
 document.addEventListener('focus',event=>{if(event.target.id==='workshop-code'&&event.target.value.length===event.target.maxLength)event.target.select();},true);
 
 $('#dialog').addEventListener('cancel',()=>{towerSetupEpoch++;});

@@ -17,10 +17,10 @@ test('workshop-bound short invites atomically redeem, select target and admit ex
  expect((await call('workshops/join',a,{},scope)).data.member.state).toBe('pending');
  const code=await invite(host,scope);
  expect((await call('workshops/join',a,{invitation:code.code})).status).toBe(403); // wrong room
- const results=await Promise.all([call('workshops/redeem-code',a,{code:code.code}),call('workshops/redeem-code',b,{code:code.code})]);expect(results.map(r=>r.status).sort()).toEqual([200,403]);
+ const results=await Promise.all([call('workshops/redeem-code',a,{code:code.code}),call('workshops/redeem-code',b,{code:code.code})]);expect(results.map(r=>r.status).sort()).toEqual([200,410]);
  const winner=results[0].status===200?a:b;expect(results.find(r=>r.status===200)!.data).toMatchObject({workshopId:scope,member:{state:'admitted',workshopId:scope}});
  expect((await call('room',winner,undefined,scope)).data.board).toBeDefined();expect((await call('room',winner)).data.board).toBeUndefined();
- const rows=app.db.query('SELECT * FROM invitations').all();expect(JSON.stringify(rows)).not.toContain(code.code);expect((rows[0] as any).remaining).toBe(0);
+ const rows=app.db.query('SELECT * FROM invitations').all();expect(rows[0]).toMatchObject({code:code.code,remaining:0,initial_uses:1,status:'exhausted'});
  const legacy=await invite(host);const pending=await login();expect(pending.member.state).toBe('pending');expect((await call('workshops/redeem-code',pending,{code:legacy.code})).data.member.state).toBe('admitted');
 });
 test('legacy expiry values are ignored while exhaustion, bans, host/CSRF gates and malformed bodies stay enforced',async()=>{
@@ -31,7 +31,7 @@ test('legacy expiry values are ignored while exhaustion, bans, host/CSRF gates a
  for(const value of [123456,[code.code],{code:code.code},'12','not-a-code'])expect((await call('workshops/redeem-code',a,{code:value})).status).toBe(400);
  app.db.run('UPDATE invitations SET expires_at=? WHERE hash=?',[1,sha256(code.code)]);
  expect((await call('workshops/redeem-code',a,{code:code.code})).status).toBe(200);
- expect((await call('workshops/redeem-code',b,{code:code.code})).status).toBe(403);
+ expect((await call('workshops/redeem-code',b,{code:code.code})).status).toBe(410);
  const fresh=await invite(host,scope);await call('workshops/join',a,{},scope);await call('host/members/'+a.member.pubkey,host,{state:'banned',allowance:20},scope);
  expect((await call('workshops/redeem-code',a,{code:fresh.code})).status).toBe(403);expect((app.db.query('SELECT remaining FROM invitations WHERE hash=?').get(sha256(fresh.code)) as any).remaining).toBe(1);
 });
@@ -43,11 +43,34 @@ test('whitespace normalization cannot bypass join attempt limits or direct sign-
  const b=await login();expect((await call('workshops/join',b,{invitation:' '+code.code+' '})).status).toBe(200);
 });
 test('global attempts survive restart, cap newly created identities, and active codes do not collide',async()=>{
- const host=await login(key);const codes=new Set<string>();for(let i=0;i<20;i++)codes.add((await invite(host)).code);expect(codes.size).toBe(20);
+ const host=await login(key);const codes=new Set<string>();for(let i=0;i<20;i++){const scope=await workshop(host);codes.add((await invite(host,scope)).code);}expect(codes.size).toBe(20);
  codeAttempt(app.db,host.member.pubkey);app.db.run("UPDATE invitation_attempts SET attempts=299 WHERE actor='installation'");
  const a=await login();expect((await call('workshops/redeem-code',a,{code:'000000'})).status).toBe(403);
  app.db.close();app=application({origin,hostPubkey:getPublicKey(key),dataDir:dir,version:'restart'});
  const b=await login();expect((await call('workshops/redeem-code',b,{code:[...codes][0]})).status).toBe(429);
+});
+test('shared invitation enforces 1–50 boundaries, one active code, redisplay and remaining counts',async()=>{
+ const host=await login(key),scope=await workshop(host);
+ for(const uses of [0,51,1.5])expect((await call('host/invitations',host,{uses,shortCode:true},scope)).status).toBe(400);
+ const created=await invite(host,scope,50);
+ expect((await call('host/invitations',host,{uses:1,shortCode:true},scope)).status).toBe(409);
+ let read=await call('host/invitations',host,undefined,scope);expect(read.data.active).toMatchObject({code:created.code,status:'active',limit:50,used:0,remaining:50,url:created.url,qr:created.qr});
+ const participant=await login();expect((await call('workshops/redeem-code',participant,{code:created.code})).status).toBe(200);
+ read=await call('host/invitations',host,undefined,scope);expect(read.data.active).toMatchObject({code:created.code,limit:50,used:1,remaining:49});
+ app.db.close();app=application({origin,hostPubkey:getPublicKey(key),dataDir:dir,version:'restart'});
+ read=await call('host/invitations',host,undefined,scope);expect(read.data.active).toMatchObject({code:created.code,used:1,remaining:49});
+ const other=await workshop(host);expect((await invite(host,other,1)).limit).toBe(1);
+});
+test('stop and final redemption serialize, retain admitted people, and allow a distinct replacement',async()=>{
+ const host=await login(key),scope=await workshop(host),participant=await login(),code=await invite(host,scope,1);
+ const [redeem,stop]=await Promise.all([call('workshops/redeem-code',participant,{code:code.code}),call('host/invitations/stop',host,{},scope)]);
+ expect([[200,409],[410,200]]).toContainEqual([redeem.status,stop.status]);
+ const member=app.db.query('SELECT state FROM workshop_members WHERE workshop_id=? AND pubkey=?').get(scope,participant.member.pubkey) as any;
+ if(redeem.status===200)expect(member.state).toBe('admitted');else expect(member).toBeNull();
+ expect((await call('workshops/redeem-code',await login(),{code:code.code})).status).toBe(410);
+ const read=await call('host/invitations',host,undefined,scope);expect(read.data.active).toBeNull();expect(['stopped','exhausted']).toContain(read.data.latest.status);
+ const replacement=await invite(host,scope,1);expect(replacement.code).not.toBe(code.code);
+ if(redeem.status===200)expect((app.db.query('SELECT state FROM workshop_members WHERE workshop_id=? AND pubkey=?').get(scope,participant.member.pubkey) as any).state).toBe('admitted');
 });
 test('an already stored invitation with a past expiry remains redeemable after database restart',async()=>{
  const host=await login(key),scope=await workshop(host),code=await invite(host,scope);

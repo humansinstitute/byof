@@ -211,8 +211,10 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport?:(s
       if(towerSetupRoute&&method==='POST'){const [_,id,action]=towerSetupRoute;const selected=site.selection(request);return json(action==='create-intent'?towerConnector.intent(identity,id!,selected,body):action==='create'?await towerConnector.create(identity,id!,selected,body):await towerConnector.bind(identity,id!,selected,body));}
       if(path==='/api/v1/workshops/redeem-code'&&method==='POST'){
         codeAttempt(db,identity.pubkey);demand(typeof body.code==='string'&&/^\d{6}$/.test(body.code),400,'Enter a six-digit workshop code');
-        const invitation=db.query('SELECT workshop_id FROM invitations WHERE hash=? AND remaining>0').get(sha256(body.code)) as any;
-        demand(invitation,403,'Invitation is invalid or exhausted');
+        const invitation=db.query('SELECT workshop_id,status,remaining FROM invitations WHERE hash=? AND code IS NOT NULL').get(sha256(body.code)) as any;
+        demand(invitation,403,'Invitation is invalid');
+        demand(invitation.status!=='stopped',410,'Invitation has been stopped');
+        demand(invitation.status==='active'&&invitation.remaining>0,410,'Invitation is exhausted');
         const target=new Workshop(db,workshop.assets,invitation.workshop_id);
         const joined=target.join(target.scoped(identity),{invitation:body.code});return json({member:joined,workshopId:target.id});
       }
@@ -355,7 +357,10 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport?:(s
       }
       if (path === "/api/v1/host/settings" && method === "POST") return json(workshop.settings(member, body));
       if (path === "/api/v1/host/people" && method === "GET") return json(workshop.people(member));
-      if (path === "/api/v1/host/invitations" && method === "POST") {const invitation=workshop.invitation(member,body);if(invitation.code){const url=origin+'/?code='+invitation.code;return json({...invitation,url,qr:encodeQR(url,'data-url',{scale:6,border:4,ecc:'medium'})});}return json(invitation);}
+      const presentInvitation=(invitation:any)=>{if(!invitation?.code)return invitation;const url=origin+'/?code='+invitation.code;return {...invitation,url,qr:encodeQR(url,'data-url',{scale:6,border:4,ecc:'medium'})};};
+      if (path === "/api/v1/host/invitations" && method === "GET") {const result=workshop.sharedInvitation(member);return json({...result,active:presentInvitation(result.active)});}
+      if (path === "/api/v1/host/invitations" && method === "POST") return json(presentInvitation(workshop.invitation(member,body)));
+      if (path === "/api/v1/host/invitations/stop" && method === "POST") return json(workshop.stopInvitation(member));
       const moderation = path.match(/^\/api\/v1\/host\/(members|projects)\/([^/]+)$/);
       if (moderation && method === "POST") return json(moderation[1] === "members" ? workshop.moderate(member, moderation[2]!, body) : workshop.visibility(member, moderation[2]!, body));
       if (path === "/api/v1/host/publication/prepare" && method === "POST") return json({ snapshot: publication.prepare(member, body.selections, body.siteName), public: false, published: false }, 201);

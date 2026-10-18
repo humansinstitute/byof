@@ -422,12 +422,13 @@ body.canvas-page .board-viewport{height:100dvh;min-height:240px}
 .invite-code{margin:14px 0 20px;text-align:center}
 .invite-code span{display:block;color:var(--muted);font-size:13px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
 .invite-code strong{display:block;font:800 clamp(34px,10vw,48px)/1.15 ui-monospace,monospace;letter-spacing:.16em;padding-left:.16em;font-variant-numeric:tabular-nums}
+.invite-usage{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0}.invite-usage div{min-width:0;padding:10px;text-align:center;background:var(--soft);border-radius:8px}.invite-usage dt{font-size:12px;color:var(--muted)}.invite-usage dd{margin:3px 0 0;font-size:22px;font-weight:800}.invite-stop{margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}.invite-state{padding:10px 12px;border-radius:8px;background:var(--soft)}.invite-state.stopped{background:#fff0ed;color:#711b16}.invite-state.exhausted{background:#fff6d8;color:#664b00}
 #invite-url{width:100%;min-height:70px;resize:none;overflow-wrap:anywhere;word-break:break-all;user-select:text}
 .copy-feedback{min-height:1.5em;margin:8px 0 0;font-size:13px}
 .copy-feedback.success{color:#155f35}.copy-feedback.error{color:#8c211b;background:#fff0ed;padding:10px}
 #code-join-form{margin:16px 0;max-width:340px}
 #workshop-code{font-size:24px;letter-spacing:5px;color:var(--ink);background:var(--white);caret-color:var(--ink);-webkit-text-fill-color:var(--ink);opacity:1}
-@media(max-width:650px){.canvas-title{max-width:calc(100% - 216px)}.canvas-invite{min-height:44px;height:44px}.invite-qr{width:min(220px,65vw)}}
+@media(max-width:650px){.canvas-title{max-width:calc(100% - 216px)}.canvas-invite{min-height:44px;height:44px}.invite-qr{width:min(220px,65vw)}.invite-usage{grid-template-columns:1fr}.invite-usage div{display:flex;justify-content:space-between;align-items:baseline}.invite-usage dd{font-size:18px}}
 
 #arrow-controls{position:absolute;right:12px;bottom:12px;z-index:35;display:flex;align-items:center;gap:8px;padding:8px;background:#fff;border:1px solid #bbb;border-radius:8px}
 #arrow-controls[hidden]{display:none}
