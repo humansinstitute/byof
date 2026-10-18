@@ -77,7 +77,11 @@ test("Pong starts stationary with documented keyboard and discrete touch control
   expect(source).toContain("Ready. Press Space or Start. Score 0–0.");
   expect(source).toContain('const canvas=document.querySelector("#pong")');
   expect(source).toContain("running:false");
-  expect(source).toContain('event.key==="ArrowUp"||event.key==="ArrowDown"');
+  expect(source).toContain('["ArrowUp","ArrowDown","w","W","s","S"].includes(event.key)');
+  expect(source).toContain('keys.add(event.key)');
+  expect(source).toContain('document.addEventListener("keyup",event=>keys.delete(event.key))');
+  expect(source).toContain('addEventListener("blur",()=>keys.clear())');
+  expect(source).toContain('movePaddle(-1,PADDLE_KEY_SPEED)');
   expect(source).toContain('if(event.code==="Space")');
   expect(source).toContain('event.key==="r"||event.key==="R"');
   expect(source).toContain('event.pointerType!=="touch"');

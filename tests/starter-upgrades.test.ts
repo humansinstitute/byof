@@ -4,7 +4,7 @@ import {join} from "node:path";
 import {application} from "../src/application.ts";
 import {Assets} from "../src/assets.ts";
 import {openDatabase} from "../src/database.ts";
-import {originalCashuSource,originalPongSource,originalSpinnerSource,pointerPongSource,starters} from "../src/starters.ts";
+import {mouseFreePongSource,originalCashuSource,originalPongSource,originalSpinnerSource,pointerPongSource,starters} from "../src/starters.ts";
 
 const title="Bitcoin spinner",description="Ask the important question. The answer is always Yes.";
 
@@ -78,7 +78,7 @@ test("startup upgrades only exact untouched original SATCADE lineage and is idem
 
 test("startup upgrades only exact untouched original Pong lineage and is idempotent",()=>{
   const directory=mkdtempSync("/tmp/freedom-pong-upgrade-"),owner="c".repeat(64),title="Pong",description="Play the classic paddle game immediately with keyboard or touch controls.";
-  const db=openDatabase(directory),assets=new Assets(join(directory,"objects")),oldHash=assets.put(originalPongSource),pointerHash=assets.put(pointerPongSource),editedHash=assets.put(originalPongSource.replace("Game running.","My game."));
+  const db=openDatabase(directory),assets=new Assets(join(directory,"objects")),oldHash=assets.put(originalPongSource),pointerHash=assets.put(pointerPongSource),mouseFreeHash=assets.put(mouseFreePongSource),editedHash=assets.put(originalPongSource.replace("Game running.","My game."));
   const workshopId=(db.query("SELECT workshop_id FROM workshop_identity WHERE id=1").get() as any).workshop_id;
   db.run("INSERT INTO members(pubkey,name,identity_type,state,created_at) VALUES(?,'Owner','temporary','admitted',1)",[owner]);
   const seed=(id:string,sourceHash:string,options:{title?:string;description?:string;origin?:string|null;revisions?:number;restored?:boolean;deleted?:boolean;firstHash?:string}={})=>{
@@ -92,6 +92,12 @@ test("startup upgrades only exact untouched original Pong lineage and is idempot
   seed("untouched",oldHash);
   seed("pointer-fresh",pointerHash,{firstHash:pointerHash});
   seed("pointer-upgraded",pointerHash,{revisions:2});
+  seed("mousefree-fresh",mouseFreeHash,{firstHash:mouseFreeHash});
+  seed("mousefree-original",mouseFreeHash,{revisions:2});
+  seed("mousefree-pointer",mouseFreeHash,{revisions:2,firstHash:pointerHash});
+  seed("mousefree-chain",pointerHash,{revisions:2});
+  db.run("INSERT INTO revisions(id,project_id,number,parent_id,restored_from,source_hash,author,created_at) VALUES('mousefree-chain-r3','mousefree-chain',3,'mousefree-chain-r2',NULL,?,?,3)",[mouseFreeHash,owner]);
+  db.run("UPDATE projects SET current_revision='mousefree-chain-r3' WHERE id='mousefree-chain'");
   seed("renamed",oldHash,{title:"My Pong"});
   seed("redescribed",oldHash,{description:"My paddle game"});
   seed("edited",editedHash,{revisions:2});
@@ -109,6 +115,10 @@ test("startup upgrades only exact untouched original Pong lineage and is idempot
     ]);
     expect(app.db.query("SELECT number,source_hash FROM revisions WHERE project_id='pointer-fresh' ORDER BY number").all()).toEqual([{number:1,source_hash:pointerHash},{number:2,source_hash:correctedHash}]);
     expect(app.db.query("SELECT number,source_hash FROM revisions WHERE project_id='pointer-upgraded' ORDER BY number").all()).toEqual([{number:1,source_hash:oldHash},{number:2,source_hash:pointerHash},{number:3,source_hash:correctedHash}]);
+    for(const id of ["mousefree-fresh","mousefree-original","mousefree-pointer","mousefree-chain"]){
+      const rows=app.db.query("SELECT source_hash FROM revisions WHERE project_id=? ORDER BY number").all(id) as {source_hash:string}[];
+      expect(rows.at(-1)!.source_hash).toBe(correctedHash);
+    }
     for(const id of ["renamed","redescribed","edited","restored","fork","deleted"]){
       const rows=app.db.query("SELECT source_hash FROM revisions WHERE project_id=? ORDER BY number").all(id) as any[];
       expect(rows.at(-1)!.source_hash).not.toBe(correctedHash);
@@ -117,5 +127,9 @@ test("startup upgrades only exact untouched original Pong lineage and is idempot
     expect(app.db.query("SELECT COUNT(*) count FROM revisions WHERE project_id='untouched'").get()).toEqual({count:2});
     expect(app.db.query("SELECT COUNT(*) count FROM revisions WHERE project_id='pointer-fresh'").get()).toEqual({count:2});
     expect(app.db.query("SELECT COUNT(*) count FROM revisions WHERE project_id='pointer-upgraded'").get()).toEqual({count:3});
+    expect(app.db.query("SELECT COUNT(*) count FROM revisions WHERE project_id='mousefree-fresh'").get()).toEqual({count:2});
+    expect(app.db.query("SELECT COUNT(*) count FROM revisions WHERE project_id='mousefree-original'").get()).toEqual({count:3});
+    expect(app.db.query("SELECT COUNT(*) count FROM revisions WHERE project_id='mousefree-pointer'").get()).toEqual({count:3});
+    expect(app.db.query("SELECT COUNT(*) count FROM revisions WHERE project_id='mousefree-chain'").get()).toEqual({count:4});
   }finally{app.db.close();rmSync(directory,{recursive:true,force:true});}
 });
