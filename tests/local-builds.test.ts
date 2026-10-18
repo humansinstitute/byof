@@ -8,7 +8,7 @@ import {refreshProjectGuidance,localTurnPrompt} from '../src/local-builds.ts';
 import {copyProjectFiles} from '../src/project-migration.ts';
 import {sha256} from '../src/assets.ts';
 import {projectRoute} from '../src/project-routing.ts';
-import {nappletExecutionContract} from '../src/builder-prompt.ts';
+import {effectiveNappletExecutionContract} from '../src/builder-prompt.ts';
 test('Goose GLM turns forbid image-producing tools while other runtimes retain general validation guidance',()=>{
  const base:any={requestId:'request',projectId:'project',contextHash:'hash',mode:'build',prompt:'Build it',builderPrompt:{revision:2,text:'Guidance',agentName:'Agent 21'},replacementContext:{workingDirectory:'/project',currentRevision:'revision',sourceHash:'hash',fileBuild:{currentCompletedVersion:0,version:1,artifactPath:'.drafts/x/v1/index.html'},builderEngine:{runtime:{agent:'goose',provider:'openrouter',model:'z-ai/glm-5.3'}}}};
  const goose=localTurnPrompt(base);expect(goose).toContain('text-only z-ai/glm-5.3');expect(goose).toContain('Never call computer-controller, screenshot, image-capture, vision');
@@ -29,9 +29,9 @@ test('real files: immutable versions, answers, duplicate completion, failed draf
    app.workshop.request(member,p.id,{requestId:id,prompt:kind,expectedRevisionId:project.current_revision,mode:'auto'},true);
    let input:any;await dispatchFollowup(app.workshop,member,p.id,id,cfg,async v=>{input=v;return {runId:id,receipt:{}};});
    const prepared=prepareTrustedFollowup(input,scope);
-   expect(prepared.prompt).toContain(nappletExecutionContract);
+   expect(prepared.prompt).toContain(effectiveNappletExecutionContract);
    // Keep routing compact while allowing the newly documented runtime API.
-   expect(prepared.prompt.replace(nappletExecutionContract,'').length).toBeLessThan(2400);
+   expect(prepared.prompt.replace(effectiveNappletExecutionContract,'').length).toBeLessThan(2400);
    expect(JSON.parse(readFileSync(folder+'/.context/requests/'+input.contextHash+'.json','utf8')).latestPrompt.requestId).toBe(id);
    const b=input.replacementContext.fileBuild;
    if(kind==='build')writeFileSync(folder+'/'+b.artifactPath,valid?`<html><body>Build ${sequence}</body></html>`:'invalid');

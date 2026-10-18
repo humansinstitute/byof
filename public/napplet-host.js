@@ -1,14 +1,14 @@
 // Trusted parent only. No host cookie, CSRF, lease token or signer enters the iframe.
 import { canvasDomain, datasetDisplayName } from '/canvas-host.js';
 import { participantSigner, verifyEvent, getEventHash } from '/identity.js';
-const VERSION=1, MAX_BYTES=49152, METHODS=['capabilities','identity.getPublicKey','signing.signEvent','storage.get','storage.set','storage.remove','relay.query','relay.subscribe','relay.close','cashu.status','cashu.connect','cashu.createDeposit','cashu.checkDeposit','cashu.disconnect'];
+const VERSION=1, MAX_BYTES=49152, METHODS=['capabilities','identity.getPublicKey','signing.signEvent','storage.get','storage.set','storage.remove','relay.query','relay.subscribe','relay.close','cashu.status','cashu.connect','cashu.createDeposit','cashu.checkDeposit','cashu.pay','cashu.checkPayment','cashu.disconnect'];
 const SIGN_KINDS=[1,30023,30024,30078];
 export function installNappletHost(context) {
   const error=(code,message)=>Object.assign(new Error(message),{code});
   const relayPool=createRelayPool(verifyEvent);
   const canvas=canvasDomain({context,backend,ask,assert,error,close});
   const allMethods=[...METHODS,...canvas.methods];
-  const frames=new Map(), retired=new WeakMap(); let consent=null, signingPending=false;
+  const frames=new Map(), retired=new WeakMap(); let consent=null, signingPending=false, paymentPending=false;
   function stamp() { const c=context(); return c.member?`${c.member.pubkey}:${c.workshop}`:''; }
   function frameKey(frame){return [frame.dataset.workshop,frame.dataset.project,frame.dataset.revision,frame.dataset.sourceHash,frame.dataset.src,frame.getAttribute('src')].join(':');}
   function valid(b) { return !b.closed && b.frame.isConnected && b.frame.contentWindow===b.window && frameKey(b.frame)===b.key && b.frame.getAttribute('sandbox')==='allow-scripts allow-forms' && (!b.expires||Date.now()<b.expires) && stamp()===b.stamp; }
@@ -52,7 +52,7 @@ export function installNappletHost(context) {
     return new Promise((resolve,reject)=>{
       const dialog=document.createElement('dialog');dialog.className='napplet-consent';
       const datasetLabel=kind==='dataset'?datasetDisplayName(event.name):'';
-      const heading=document.createElement('h2');heading.textContent=kind==='dataset'?`Open ${datasetLabel}?`:kind==='identity'?'Share your public identity?':'Sign this Napplet event?';heading.id='napplet-consent-title';dialog.setAttribute('aria-labelledby',heading.id);dialog.append(heading);
+      const heading=document.createElement('h2');heading.textContent=kind==='dataset'?`Open ${datasetLabel}?`:kind==='identity'?'Share your public identity?':kind==='payment'?'Approve wallet payment?':'Sign this Napplet event?';heading.id='napplet-consent-title';dialog.setAttribute('aria-labelledby',heading.id);dialog.append(heading);
       const summary=document.createElement('p');summary.textContent=kind==='dataset'?`${b.title} can read and update information ${event.visibility==='shared'?'shared with everyone':'saved privately for you'} on this Canvas.`:`${b.title} · v${b.revisionNumber} · ${b.workshopTitle}`;dialog.append(summary);
       if(kind==='dataset'){const note=document.createElement('p');note.textContent='This access stays with this tool on this Canvas, and you can revoke it at any time.';dialog.append(note);}
       const details=document.createElement('details'),label=document.createElement('summary');label.textContent=kind==='dataset'?'Technical details':'Inspect app binding';details.append(label);
@@ -61,12 +61,18 @@ export function installNappletHost(context) {
       const key=document.createElement('code');key.className='consent-pubkey';key.textContent=b.user;
       const binding=document.createElement('p');binding.textContent=`Project ${b.project} · revision ${b.revision} · BYOF Canvas ${b.workshop}`;
       if(kind==='dataset')details.append(app,identity,key,binding);else dialog.append(identity,key),details.append(binding);
-      if(event){const pre=document.createElement('pre');pre.textContent=JSON.stringify(event,null,2);kind==='dataset'?details.append(pre):dialog.append(pre);}
+      if(kind==='payment'){
+        const warning=document.createElement('p');warning.className='warning';warning.textContent='Approving this will send money. Wallet funds will leave your account.';
+        const amount=document.createElement('p');amount.textContent=`Amount: ${event.amount} ${event.unit}`;
+        const destinationLabel=document.createElement('p');destinationLabel.textContent=event.destinationType==='bolt11'?'BOLT11 destination:':'Lightning address destination:';
+        const destination=document.createElement('code');destination.className='consent-destination';destination.textContent=event.destination;
+        dialog.append(warning,amount,destinationLabel,destination);
+      }else if(event){const pre=document.createElement('pre');pre.textContent=JSON.stringify(event,null,2);kind==='dataset'?details.append(pre):dialog.append(pre);}
       dialog.append(details);
-      if(kind!=='dataset'){const explanation=document.createElement('p');explanation.textContent=kind==='identity'?'Allow this running version to read your authenticated public key. You can revoke access with the host’s Revoke Napplet permissions button or by leaving this page.':'Review the complete event below. Approval asks your current signer to sign exactly this content as your logged-in account. The signature may be copied by this app. This host does not publish it.';dialog.insertBefore(explanation,details);}
+      if(kind!=='dataset'){const explanation=document.createElement('p');explanation.textContent=kind==='identity'?'Allow this running version to read your authenticated public key. You can revoke access with the host’s Revoke Napplet permissions button or by leaving this page.':kind==='payment'?'Confirm the exact app version, Canvas, account, destination and amount before approving. Denying or closing this dialog sends nothing.':'Review the complete event below. Approval asks your current signer to sign exactly this content as your logged-in account. The signature may be copied by this app. This host does not publish it.';dialog.insertBefore(explanation,details);}
       const actions=document.createElement('div');actions.className='actions';
       const deny=document.createElement('button');deny.textContent=kind==='dataset'?'Not now':'Deny';deny.dataset.nappletConsent='deny';
-      const allow=document.createElement('button');allow.textContent=kind==='dataset'?'Open':kind==='identity'?'Allow identity':'Approve signing';allow.dataset.nappletConsent='allow';
+      const allow=document.createElement('button');allow.textContent=kind==='dataset'?'Open':kind==='identity'?'Allow identity':kind==='payment'?'Approve payment':'Approve signing';allow.dataset.nappletConsent='allow';
       actions.append(deny,allow);dialog.append(actions);document.body.append(dialog);
       let done=false;
       const finish=(approved)=>{if(done)return;done=true;signal.removeEventListener('abort',cancel);dialog.close();dialog.remove();consent=null;if(approved){try{assert(b);resolve();}catch(e){reject(e);}}else reject(error('DENIED','Permission denied or revoked'));};
@@ -81,10 +87,23 @@ export function installNappletHost(context) {
     return JSON.parse(JSON.stringify(input));
   }
   async function execute(b,method,p,signal) {
-    if(method==='capabilities'){if(Object.keys(p).length)throw error('INVALID','Capabilities takes no parameters');return {version:VERSION,methods:allMethods,cashu:{managed:true,provider:'Minibits Ippon',scope:'canvas-project-user',methods:['status','connect','createDeposit','checkDeposit','disconnect'],amount:{integer:true,min:1,max:100000}},datasets:{explicitConsent:true,sharedRequiresCanvasAccess:true,valueBytes:32768,keys:128,quotaBytes:4194304,versionChecked:true},signing:{available:!!participantSigner(context().member.identity_type),kinds:SIGN_KINDS},storage:{durable:true,keyBytes:128,valueBytes:32768,quotaBytes:262144,keys:128},limits:{requestBytes:MAX_BYTES,concurrency:4,timeoutMs:60000},relay:{readOnly:true,relays:APPROVED_RELAYS,limits:RELAY_LIMITS},publication:false};}
+    if(method==='capabilities'){if(Object.keys(p).length)throw error('INVALID','Capabilities takes no parameters');return {version:VERSION,methods:allMethods,cashu:{managed:true,provider:'Minibits Ippon',scope:'canvas-project-user',methods:['status','connect','createDeposit','checkDeposit','pay','checkPayment','disconnect'],amount:{integer:true,min:1,max:100000},payment:{hostConfirmation:true,destinations:['bolt11','lightningAddress']}},datasets:{explicitConsent:true,sharedRequiresCanvasAccess:true,valueBytes:32768,keys:128,quotaBytes:4194304,versionChecked:true},signing:{available:!!participantSigner(context().member.identity_type),kinds:SIGN_KINDS},storage:{durable:true,keyBytes:128,valueBytes:32768,quotaBytes:262144,keys:128},limits:{requestBytes:MAX_BYTES,concurrency:4,timeoutMs:60000},relay:{readOnly:true,relays:APPROVED_RELAYS,limits:RELAY_LIMITS},publication:false};}
     if(method.startsWith('cashu.')){
-      const action=method.slice(6),allowed=action==='createDeposit'?['amount']:action==='checkDeposit'?['quote']:[];
-      if(Object.keys(p).some(k=>!allowed.includes(k))||Object.keys(p).length!==allowed.length)throw error('INVALID','Invalid managed Cashu parameters');
+      const action=method.slice(6),allowed=action==='createDeposit'?['amount']:action==='checkDeposit'||action==='checkPayment'?['quote']:action==='pay'?['bolt11Request','lightningAddress','amount']:[];
+      if(Object.keys(p).some(k=>!allowed.includes(k))||(action==='pay'?(Object.keys(p).length!==2||(!('bolt11Request'in p)&&!('lightningAddress'in p))):Object.keys(p).length!==allowed.length))throw error('INVALID','Invalid managed Cashu parameters');
+      if(action==='pay'){
+        if(paymentPending)throw error('BUSY','Another payment confirmation is already open');
+        paymentPending=true;let preview,submitted=false;
+        try{
+          preview=await backend(b,'cashu',{token:b.token,method:'paymentPreview',...p},signal);
+          await ask(b,'payment',preview,signal);assert(b);if(signal.aborted)throw error('TIMEOUT','Payment confirmation timed out');
+          submitted=true;
+          return await backend(b,'cashu',{token:b.token,method:'pay',confirmationToken:preview.confirmationToken,amount:preview.amount,unit:preview.unit,...(preview.destinationType==='bolt11'?{bolt11Request:preview.destination}:{lightningAddress:preview.destination})},signal);
+        }finally{
+          if(preview&&!submitted)void backend(b,'cashu',{token:b.token,method:'cancelPaymentPreview',confirmationToken:preview.confirmationToken},new AbortController().signal).catch(()=>{});
+          paymentPending=false;
+        }
+      }
       return backend(b,'cashu',{token:b.token,method:action,...p},signal);
     }
     if(method.startsWith('datasets.'))return canvas.execute(b,method,p,signal);

@@ -14,8 +14,9 @@ export function validateGeneratedHtml(source: unknown): string {
     demand(!(name==='script'&&/\bsrc\s*=/i.test(attributes)) &&
       !(name==='link'&&/\brel\s*=\s*(?:["']\s*)?stylesheet\b/i.test(attributes)) &&
       !(name==='form'&&/\baction\s*=/i.test(attributes)),400,'Generated app must be self-contained');
-    demand(!/\b(?:src|srcset|poster|data)\s*=\s*(?:["']\s*)?(?:https?:|\/\/)/i.test(attributes) &&
-      (name==='a' || !/\bhref\s*=\s*(?:["']\s*)?(?:https?:|\/\/)/i.test(attributes)),400,'Generated app must be self-contained');
+    for(const remote of attributes.matchAll(/\b(src|srcset|poster|data)\s*=\s*(?:["']\s*)?(https?:|\/\/)/gi))
+      demand(name==='img'&&remote[1]!.toLowerCase()==='src'&&remote[2]!.toLowerCase()==='https:',400,'Generated app must keep active assets self-contained');
+    demand(name==='a' || !/\bhref\s*=\s*(?:["']\s*)?(?:https?:|\/\/)/i.test(attributes),400,'Generated app must keep active assets self-contained');
   }
   return source;
 }

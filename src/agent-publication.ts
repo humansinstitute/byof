@@ -11,7 +11,7 @@ export function installAgentPublication(db:Workshop['db']) {
 }
 export function publicationAuthority(workshop:Workshop,body:any) {
   const db=workshop.db,r=db.query('SELECT * FROM requests WHERE id=? AND project_id=?').get(body.requestId,body.projectId) as any;
-  const p=r&&db.query('SELECT * FROM projects WHERE id=? AND workshop_id=?').get(r.project_id,workshop.id) as any;
+  const p=r&&db.query('SELECT * FROM projects WHERE id=? AND workshop_id=? AND deleted_at IS NULL').get(r.project_id,workshop.id) as any;
   const n=body.candidate?.nativeReceipt;
   const inputRow=r&&db.query('SELECT input_json FROM request_recoveries WHERE request_id=?').get(r.id) as any;
   const input=inputRow&&JSON.parse(inputRow.input_json);

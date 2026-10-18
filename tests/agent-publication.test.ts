@@ -151,10 +151,11 @@ test('remote tool hands exact builder bytes to the app-authenticated candidate e
   expect((f.app.db.query('SELECT candidate_json FROM agent_publications WHERE request_id=?').get(t.id) as any).candidate_json).not.toContain('sourceBase64');
  }finally{f.close();rmSync(remote,{recursive:true,force:true});}
 });
-test('citation anchors and direct service code are allowed; external active resources remain rejected',()=>{
+test('citation anchors, HTTPS images and direct service code are allowed; external active resources remain rejected',()=>{
  expect(validateGeneratedHtml('<html><body><a href="https://example.org/report">Source</a></body></html>')).toContain('Source');
+ expect(validateGeneratedHtml('<html><body><img src="https://media.example/photo.png" alt="Public photo" loading="lazy" referrerpolicy="no-referrer"></body></html>')).toContain('Public photo');
  expect(validateGeneratedHtml('<html><body><script>fetch("https://api.example/data");new WebSocket("wss://socket.example")</script></body></html>')).toContain('fetch');
- for(const tag of ['<script src="https://evil.test/x.js"></script>','<link rel="stylesheet" href=https://evil.test/x.css>','<img src="https://evil.test/x">','<iframe src="local"></iframe>','<video poster="https://evil.test/x"></video>'])expect(()=>validateGeneratedHtml('<html><body>'+tag+'</body></html>')).toThrow('self-contained');
+ for(const tag of ['<script src="https://evil.test/x.js"></script>','<link rel="stylesheet" href=https://evil.test/x.css>','<img src="http://evil.test/x">','<iframe src="local"></iframe>','<video poster="https://evil.test/x"></video>'])expect(()=>validateGeneratedHtml('<html><body>'+tag+'</body></html>')).toThrow('self-contained');
 });
 
 test('signed app-version and independent message URLs reject wrong signer/body/method; duplicates acknowledge one version',async()=>{

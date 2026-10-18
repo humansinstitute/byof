@@ -38,7 +38,7 @@ export class Publication {
     return this.db.transaction(()=>{
       const room=this.workshop.roomRow();
       const apps=selections.map(selection=>{
-        const row=this.db.query("SELECT p.*,m.pubkey,m.name,r.id revision_id,r.number,r.source_hash FROM projects p JOIN revisions r ON r.id=p.shared_revision JOIN members m ON m.pubkey=p.owner JOIN consent c ON c.project_id=p.id AND c.revision_id=r.id WHERE p.id=? AND r.id=? AND c.granted=1 AND p.hidden=0").get(selection.projectId,selection.revisionId) as any;
+        const row=this.db.query("SELECT p.*,m.pubkey,m.name,r.id revision_id,r.number,r.source_hash FROM projects p JOIN revisions r ON r.id=p.shared_revision JOIN members m ON m.pubkey=p.owner JOIN consent c ON c.project_id=p.id AND c.revision_id=r.id WHERE p.id=? AND r.id=? AND c.granted=1 AND p.hidden=0 AND p.deleted_at IS NULL").get(selection.projectId,selection.revisionId) as any;
         demand(row && row.workshop_id===this.workshop.id && this.workshop.projectOwnerAccess(row.owner)?.state==='admitted',409,"Selected revision is hidden, unshared, banned or missing exact-version public consent");
         this.assets.get(row.source_hash);
         return {projectId:row.id,revisionId:row.revision_id,title:row.title,description:row.description,authorPubkey:row.pubkey,authorName:row.name,number:row.number,sourceHash:row.source_hash,originProject:row.origin_project,originRevision:row.origin_revision};
@@ -51,7 +51,7 @@ export class Publication {
   private snapshot(member:Member,id:string):Snapshot {this.workshop.host(member);const row=this.db.query("SELECT body_json FROM publication_snapshots WHERE id=? AND host=?").get(id,member.pubkey) as any;demand(row,404,"Publication snapshot not found");const saved=JSON.parse(row.body_json);demand((saved.workshopId|| (this.db.query('SELECT workshop_id FROM workshop_identity WHERE id=1').get() as any).workshop_id)===this.workshop.id,404,'Snapshot not found');return saved;}
   private consentStillValid(snapshot:Snapshot) {
     for(const app of snapshot.apps) {
-      const p=this.db.query("SELECT p.* FROM projects p JOIN consent c ON c.project_id=p.id AND c.revision_id=p.shared_revision WHERE p.id=? AND p.shared_revision=? AND p.hidden=0 AND c.granted=1").get(app.projectId,app.revisionId) as any;
+      const p=this.db.query("SELECT p.* FROM projects p JOIN consent c ON c.project_id=p.id AND c.revision_id=p.shared_revision WHERE p.id=? AND p.shared_revision=? AND p.hidden=0 AND p.deleted_at IS NULL AND c.granted=1").get(app.projectId,app.revisionId) as any;
       demand(p && p.workshop_id===this.workshop.id && this.workshop.projectOwnerAccess(p.owner)?.state==='admitted',409,"Consent or workshop visibility changed; prepare a new publication snapshot");
     }
   }

@@ -39,12 +39,12 @@ export class HostedPublication {
     const projects=this.db.query(`SELECT p.id,p.title,p.current_revision,p.hidden,m.name author,p.owner authorPubkey,
       COALESCE(e.excluded,0) excluded FROM projects p JOIN members m ON m.pubkey=p.owner
       LEFT JOIN hosted_publication_exclusions e ON e.workshop_id=p.workshop_id AND e.project_id=p.id
-      WHERE p.workshop_id=? ORDER BY p.created_at,p.id`).all(this.workshop.id) as any[];
+      WHERE p.workshop_id=? AND p.deleted_at IS NULL ORDER BY p.created_at,p.id`).all(this.workshop.id) as any[];
     return {publication,projects:projects.map(p=>({...p,includedByDefault:!p.excluded})),canChooseName:!!member.admin};
   }
   inclusion(member:Member,projectId:string,included:boolean) {
     this.workshop.host(member);demand(typeof included==='boolean',400,'Publication inclusion must be explicit');
-    demand(this.db.query('SELECT id FROM projects WHERE id=? AND workshop_id=?').get(projectId,this.workshop.id),404,'Napplet not found');
+    demand(this.db.query('SELECT id FROM projects WHERE id=? AND workshop_id=? AND deleted_at IS NULL').get(projectId,this.workshop.id),404,'Napplet not found');
     this.db.run(`INSERT INTO hosted_publication_exclusions VALUES(?,?,?,?)
       ON CONFLICT(workshop_id,project_id) DO UPDATE SET excluded=excluded.excluded,updated_at=excluded.updated_at`,[this.workshop.id,projectId,Number(!included),now()]);
     const current=this.db.query('SELECT version FROM hosted_publications WHERE workshop_id=?').get(this.workshop.id) as any;
@@ -67,7 +67,7 @@ export class HostedPublication {
       const napplets:HostedNapplet[]=board.napplets.filter((p:any)=>p.current_revision&&!excluded.has(p.id)).map((p:any)=>{
         const row=this.db.query(`SELECT p.id,p.title,p.description,p.owner authorPubkey,m.name authorName,r.id revisionId,r.number,r.source_hash sourceHash
           FROM projects p JOIN members m ON m.pubkey=p.owner JOIN revisions r ON r.id=p.current_revision
-          WHERE p.id=? AND p.workshop_id=? AND p.hidden=0`).get(p.id,this.workshop.id) as any;
+          WHERE p.id=? AND p.workshop_id=? AND p.hidden=0 AND p.deleted_at IS NULL`).get(p.id,this.workshop.id) as any;
         demand(row&&this.workshop.projectOwnerAccess(row.authorPubkey)?.state==='admitted',409,'The Canvas changed while it was being published; try again');return {projectId:row.id,revisionId:row.revisionId,title:row.title,description:row.description,authorName:row.authorName,authorPubkey:row.authorPubkey,number:row.number,sourceHash:row.sourceHash};
       });
       const included=new Set(napplets.map(p=>p.projectId));
@@ -84,7 +84,7 @@ export class HostedPublication {
     if(!row)return null;try{
       const snapshot=JSON.parse(row.snapshot_json) as HostedSnapshot;
       const available=new Set(snapshot.napplets.filter(app=>{
-        const project=db.query('SELECT hidden,owner FROM projects WHERE id=? AND workshop_id=?').get(app.projectId,snapshot.workshopId) as any;
+        const project=db.query('SELECT hidden,owner FROM projects WHERE id=? AND workshop_id=? AND deleted_at IS NULL').get(app.projectId,snapshot.workshopId) as any;
         if(!project||project.hidden)return false;
         const exclusion=db.query('SELECT excluded FROM hosted_publication_exclusions WHERE workshop_id=? AND project_id=?').get(snapshot.workshopId,app.projectId) as any;
         if(exclusion?.excluded)return false;

@@ -58,7 +58,7 @@ export class Workshop {
   admitted(member: Member) { demand(member.host || member.state === "admitted", 403, member.state === "banned" ? "Your access is banned in this room" : "Waiting for host admission"); }
   host(member: Member) { demand(member.host, 403, "Host access required"); }
   project(member: Member, id: string, own = false): any {
-    this.admitted(member); const project = this.db.query("SELECT * FROM projects WHERE id=?").get(id) as any;
+    this.admitted(member); const project = this.db.query("SELECT * FROM projects WHERE id=? AND deleted_at IS NULL").get(id) as any;
     demand(project && project.workshop_id===this.id && (project.owner === member.pubkey || (!own && member.host)), 404, "Project not found"); return project;
   }
   editableProject(member:Member,id:string):any { return this.project(member,id,!member.host); }
@@ -67,11 +67,48 @@ export class Workshop {
     this.host(member);
     this.db.run('INSERT INTO project_admin_audit VALUES(?,?,?,?,?,?,?,?)',[crypto.randomUUID(),this.id,project.id,project.owner,member.pubkey,action,JSON.stringify(detail),now()]);
   }
+  deleteNapplet(member:Member,id:string,body:any) {
+    demand(member.admin,403,'Site administrator access required');
+    demand(body&&Object.keys(body).sort().join(',')==='confirmPermanent,confirmTitle,expectedRevisionId',400,'Unexpected deletion confirmation field');
+    const project=this.db.query('SELECT * FROM projects WHERE id=? AND workshop_id=? AND deleted_at IS NULL').get(id,this.id) as any;
+    demand(project,404,'Napplet not found');
+    demand(body.confirmPermanent===true&&body.confirmTitle===project.title,400,`Type ${project.title} and confirm permanent deletion`);
+    demand(typeof body.expectedRevisionId==='string'&&body.expectedRevisionId===project.current_revision,409,'Napplet changed; reload before deleting');
+    demand(!this.db.query("SELECT id FROM requests WHERE project_id=? AND status IN ('accepted','queued','dispatching','dispatch_pending','screening','building','storage_pending','execution_uncertain')").get(id),409,'An active or uncertain build prevents deletion; reconcile it first');
+    demand(!unresolvedNativeExecution(this.db,id),409,'Native execution is uncertain; reconcile it before deleting this Napplet');
+    const epoch=this.db.query('SELECT state FROM builder_epochs WHERE project_id=? ORDER BY generation DESC LIMIT 1').get(id) as any;
+    demand(epoch?.state!=='deleting',409,'Native builder deletion is active or uncertain; reconcile it before deleting this Napplet');
+    const lifecycle=this.db.query("SELECT status FROM builder_deletions WHERE project_id=? AND status IN ('queued','dispatching','dispatch_pending','working','failed') ORDER BY generation DESC LIMIT 1").get(id) as any;
+    demand(!lifecycle,409,'Native builder deletion is active or uncertain; reconcile it before deleting this Napplet');
+    demand(!this.db.query("SELECT c.snapshot_id FROM publication_claims c JOIN publication_snapshots s ON s.id=c.snapshot_id JOIN json_each(s.body_json,'$.apps') a WHERE c.expires_at>? AND json_extract(a.value,'$.projectId')=? LIMIT 1").get(Date.now(),id),409,'A public publication is active; reconcile it before deleting this Napplet');
+    return this.db.transaction(()=>{
+      const current=this.db.query('SELECT * FROM projects WHERE id=? AND workshop_id=? AND deleted_at IS NULL').get(id,this.id) as any;
+      demand(current,404,'Napplet not found');
+      demand(current.current_revision===body.expectedRevisionId,409,'Napplet changed; reload before deleting');
+      const stamp=now();
+      this.db.run("UPDATE builder_epochs SET state='retired',reason='napplet_deleted',retired_at=COALESCE(retired_at,?) WHERE project_id=? AND state='active'",[stamp,id]);
+      this.db.run('UPDATE consent SET granted=0,updated_at=? WHERE project_id=?',[stamp,id]);
+      this.db.run(`INSERT INTO hosted_publication_exclusions VALUES(?,?,1,?)
+        ON CONFLICT(workshop_id,project_id) DO UPDATE SET excluded=1,updated_at=excluded.updated_at`,[this.id,id,stamp]);
+      const localDataDeleted=this.db.run('DELETE FROM napplet_user_data WHERE workshop_id=? AND project_id=?',[this.id,id]).changes;
+      const board=this.db.query('SELECT version,objects_json FROM workshop_boards WHERE workshop_id=?').get(this.id) as any;
+      let boardObjectRemoved=false;
+      if(board){
+        let objects:any[]=[];try{const parsed=JSON.parse(board.objects_json);if(Array.isArray(parsed))objects=parsed;}catch{}
+        const kept=objects.filter(object=>!(object?.kind==='napplet'&&(object.projectId===id||object.id===id)));
+        boardObjectRemoved=kept.length!==objects.length;
+        if(boardObjectRemoved)this.db.run('UPDATE workshop_boards SET version=version+1,objects_json=? WHERE workshop_id=? AND version=?',[JSON.stringify(kept),this.id,board.version]);
+      }
+      demand(this.db.run('UPDATE projects SET hidden=1,shared_revision=NULL,deleted_at=?,deleted_by=? WHERE id=? AND workshop_id=? AND deleted_at IS NULL',[stamp,member.pubkey,id,this.id]).changes===1,409,'Napplet changed; reload before deleting');
+      this.db.run('INSERT INTO project_admin_audit VALUES(?,?,?,?,?,?,?,?)',[crypto.randomUUID(),this.id,id,current.owner,member.pubkey,'delete',JSON.stringify({localDataDeleted,boardObjectRemoved,externalArtifactsRetained:true,nativeLifecycleUnchanged:true}),stamp]);
+      return {deletedNappletId:id,deletedAt:stamp,localDataDeleted,boardObjectRemoved,externalArtifactsRetained:true,nativeLifecycleUnchanged:true,message:'Napplet deleted from Freedom Tools. This action did not delete external publication artifacts or change the separately audited native lifecycle.'};
+    }).immediate();
+  }
   room(member: Member) {
     const room = {...this.roomRow(),pictures:JSON.parse(this.roomRow().pictures_json||'[]')};
     if (!member.host && member.state !== "admitted") return { room, projects: [], gallery: [], starters: starters.map(({ source, ...s }) => s) };
     const donationQr=room.lightning?encodeQR('lightning:'+room.lightning,'data-url',{scale:6,border:4,ecc:'medium'}):null;
-    return { room, donationQr, board:boardSnapshot(this), projects: this.db.query("SELECT * FROM projects WHERE owner=? AND workshop_id=? ORDER BY created_at DESC").all(member.pubkey,this.id).map((p:any)=>({...p,appVersionUrl:this.versionLink(p.id,p.current_revision)})), gallery: this.db.query("SELECT p.id,p.title,p.description,p.shared_revision,p.origin_project,p.origin_revision,m.name author,p.owner authorPubkey,r.number,r.source_hash FROM projects p JOIN members m ON m.pubkey=p.owner JOIN revisions r ON r.id=p.shared_revision WHERE p.workshop_id=? AND p.hidden=0 ORDER BY p.created_at DESC").all(this.id).filter((p:any)=>this.projectOwnerAccess(p.authorPubkey)?.state==='admitted'), starters: starters.map(({ source, ...s }) => s) };
+    return { room, donationQr, board:boardSnapshot(this), projects: this.db.query("SELECT * FROM projects WHERE owner=? AND workshop_id=? AND deleted_at IS NULL ORDER BY created_at DESC").all(member.pubkey,this.id).map((p:any)=>({...p,appVersionUrl:this.versionLink(p.id,p.current_revision)})), gallery: this.db.query("SELECT p.id,p.title,p.description,p.shared_revision,p.origin_project,p.origin_revision,m.name author,p.owner authorPubkey,r.number,r.source_hash FROM projects p JOIN members m ON m.pubkey=p.owner JOIN revisions r ON r.id=p.shared_revision WHERE p.workshop_id=? AND p.hidden=0 AND p.deleted_at IS NULL ORDER BY p.created_at DESC").all(this.id).filter((p:any)=>this.projectOwnerAccess(p.authorPubkey)?.state==='admitted'), starters: starters.map(({ source, ...s }) => s) };
   }
   revision(projectId: string, revisionId: string): any { const revision = this.db.query("SELECT * FROM revisions WHERE id=? AND project_id=?").get(revisionId, projectId) as any; demand(revision, 404, "Revision not found"); return revision; }
   addRevision(project: any, sourceHash: string, actor: string, restoredFrom: string | null = null) {
@@ -85,9 +122,9 @@ export class Workshop {
     demand(!forkId,400,'Use the idempotent fork operation');
     if(!this.legacy&&!this.membership(member.pubkey))this.join(member,{});
     return this.db.transaction(() => {
-      const count = (this.db.query("SELECT COUNT(*) n FROM projects WHERE owner=? AND workshop_id=?").get(member.pubkey,this.id) as any).n;
+      const count = (this.db.query("SELECT COUNT(*) n FROM projects WHERE owner=? AND workshop_id=? AND deleted_at IS NULL").get(member.pubkey,this.id) as any).n;
       demand(count < limits.projectsPerMember, 409, "Project capacity reached");
-      if (!additional) demand(!this.db.query("SELECT id FROM projects WHERE owner=? AND workshop_id=? AND origin_project IS NULL").get(member.pubkey,this.id), 409, "Open your existing project or fork a shared app");
+      if (!additional) demand(!this.db.query("SELECT id FROM projects WHERE owner=? AND workshop_id=? AND origin_project IS NULL AND deleted_at IS NULL").get(member.pubkey,this.id), 409, "Open your existing project or fork a shared app");
       const starter = starters.find(s => s.id === starterId); demand(starter, 400, "Unknown starter");
       const hash=this.assets.put(starter.source),id = crypto.randomUUID(); this.db.run("INSERT INTO projects(id,owner,title,description,conversation_id,origin_project,origin_revision,created_at) VALUES(?,?,?,?,?,?,?,?)", [id, member.pubkey, starter.title, starter.description, additional ? projectConversation(member.pubkey, id) : crypto.randomUUID(), null, null, now()]);
       this.db.run('UPDATE projects SET workshop_id=? WHERE id=?',[this.id,id]);
@@ -101,14 +138,14 @@ export class Workshop {
     return this.db.transaction(()=>{
       const previous=this.db.query('SELECT project_id,source_project FROM project_forks WHERE workshop_id=? AND actor=? AND idempotency_key=?').get(this.id,member.pubkey,key) as any;
       if(previous){demand(previous.source_project===sourceId,409,'Fork request ID was already used for another Napplet');return {...this.detail(member,previous.project_id),idempotent:true};}
-      const source=this.db.query('SELECT * FROM projects WHERE id=? AND workshop_id=? AND hidden=0 AND current_revision IS NOT NULL').get(sourceId,this.id) as any;
+      const source=this.db.query('SELECT * FROM projects WHERE id=? AND workshop_id=? AND hidden=0 AND deleted_at IS NULL AND current_revision IS NOT NULL').get(sourceId,this.id) as any;
       demand(source&&this.projectOwnerAccess(source.owner)?.state==='admitted',404,'Napplet is no longer available to fork');
       const revision=this.revision(source.id,source.current_revision);
-      const count=(this.db.query('SELECT COUNT(*) n FROM projects WHERE owner=? AND workshop_id=?').get(member.pubkey,this.id) as any).n;
+      const count=(this.db.query('SELECT COUNT(*) n FROM projects WHERE owner=? AND workshop_id=? AND deleted_at IS NULL').get(member.pubkey,this.id) as any).n;
       demand(count<limits.projectsPerMember,409,'Project capacity reached');
       const forkTitle=(number:number)=>{const ending=number===1?' — fork':` — fork (${number})`;return source.title.slice(0,120-ending.length).trimEnd()+ending;};
       let number=1,title=forkTitle(number);
-      while(this.db.query('SELECT id FROM projects WHERE workshop_id=? AND lower(title)=lower(?)').get(this.id,title))title=forkTitle(++number);
+      while(this.db.query('SELECT id FROM projects WHERE workshop_id=? AND deleted_at IS NULL AND lower(title)=lower(?)').get(this.id,title))title=forkTitle(++number);
       const id=crypto.randomUUID(),conversationId=projectConversation(member.pubkey,id);
       this.db.run('INSERT INTO projects(id,owner,title,description,conversation_id,origin_project,origin_revision,created_at) VALUES(?,?,?,?,?,?,?,?)',[id,member.pubkey,title,source.description,conversationId,source.id,revision.id,now()]);
       this.db.run('UPDATE projects SET workshop_id=? WHERE id=?',[this.id,id]);
@@ -135,7 +172,7 @@ export class Workshop {
       const project = this.editableProject(member,id);
       const title = text(body.title, "Napplet title", 120);
       demand(!/[\u0000-\u001f\u007f]/u.test(title), 400, "Napplet title must be a single line");
-      demand(!this.db.query('SELECT id FROM projects WHERE workshop_id=? AND id<>? AND lower(title)=lower(?)').get(this.id,project.id,title),409,'Another Napplet already uses that name');
+      demand(!this.db.query('SELECT id FROM projects WHERE workshop_id=? AND deleted_at IS NULL AND id<>? AND lower(title)=lower(?)').get(this.id,project.id,title),409,'Another Napplet already uses that name');
       this.db.run("UPDATE projects SET title=? WHERE id=? AND workshop_id=? AND owner=?", [title, project.id, this.id, project.owner]);
       this.auditAdminAction(member,project,'rename',{title});
       return { project: this.editableProject(member,id) };
@@ -222,7 +259,7 @@ export class Workshop {
     if(this.legacy)this.db.run("UPDATE room SET title=?,introduction=?,lightning=?,support_label=?,paused=?,admission=? WHERE id=1", [title, intro, lightning, supportLabel, Number(body.paused), body.admission]);
     this.db.run('UPDATE workshops SET title=?,introduction=?,lightning=?,support_label=?,paused=?,admission=?,pictures_json=? WHERE id=?',[title,intro,lightning,supportLabel,Number(body.paused),body.admission,JSON.stringify(safe),this.id]); return this.room(member);
   }
-  people(member:Member) {this.host(member);return {members:this.legacy?this.db.query('SELECT * FROM members ORDER BY created_at').all():this.db.query('SELECT m.*,wm.state,wm.allowance FROM members m JOIN workshop_members wm ON wm.pubkey=m.pubkey WHERE wm.workshop_id=? ORDER BY m.created_at').all(this.id),projects:this.db.query('SELECT p.*,m.name author,p.owner authorPubkey FROM projects p JOIN members m ON m.pubkey=p.owner WHERE p.workshop_id=?').all(this.id)};}
+  people(member:Member) {this.host(member);return {members:this.legacy?this.db.query('SELECT * FROM members ORDER BY created_at').all():this.db.query('SELECT m.*,wm.state,wm.allowance FROM members m JOIN workshop_members wm ON wm.pubkey=m.pubkey WHERE wm.workshop_id=? ORDER BY m.created_at').all(this.id),projects:this.db.query('SELECT p.*,m.name author,p.owner authorPubkey FROM projects p JOIN members m ON m.pubkey=p.owner WHERE p.workshop_id=? AND p.deleted_at IS NULL').all(this.id)};}
   moderate(member: Member, pubkey: string, body: any) {
     this.host(member); const self=pubkey===member.pubkey;demand(!self||member.admin&&body.state===member.state&&body.state==='admitted',400,"Administrators may only adjust their own admitted build allowance");
     demand(["admitted", "pending", "banned"].includes(body.state), 400, "Unknown membership state"); demand(Number.isInteger(body.allowance) && body.allowance >= 0 && body.allowance <= 100, 400, "Allowance must be 0–100");
@@ -232,7 +269,7 @@ export class Workshop {
       this.db.run("INSERT INTO moderation(id,actor,member,action,created_at,workshop_id) VALUES(?,?,?,?,?,?)", [crypto.randomUUID(), member.pubkey, pubkey, body.state, now(),this.id]); return this.people(member);
     })();
   }
-  visibility(member: Member, id: string, body: any) { this.host(member); demand(typeof body.hidden === "boolean", 400, "Visibility must be explicit"); demand(this.db.run("UPDATE projects SET hidden=? WHERE id=? AND workshop_id=?", [Number(body.hidden), id,this.id]).changes === 1, 404, "Project not found"); return this.people(member); }
+  visibility(member: Member, id: string, body: any) { this.host(member); demand(typeof body.hidden === "boolean", 400, "Visibility must be explicit"); demand(this.db.run("UPDATE projects SET hidden=? WHERE id=? AND workshop_id=? AND deleted_at IS NULL", [Number(body.hidden), id,this.id]).changes === 1, 404, "Project not found"); return this.people(member); }
   invitation(member: Member, body: any) {
     this.host(member);demand(Number.isInteger(body.uses)&&body.uses>0&&body.uses<=50,400,'Invitation uses must be 1–50');
     demand(body.shortCode===undefined||typeof body.shortCode==='boolean',400,'Invalid invitation type');
@@ -245,10 +282,10 @@ export class Workshop {
     }).immediate();
   }
   previewRevision(member: Member, id: string, revisionId: string) {
-    this.admitted(member); const project = this.db.query("SELECT * FROM projects WHERE id=?").get(id) as any;
+    this.admitted(member); const project = this.db.query("SELECT * FROM projects WHERE id=? AND deleted_at IS NULL").get(id) as any;
     demand(project && project.workshop_id===this.id && (project.owner === member.pubkey || member.host || ((project.current_revision === revisionId || project.shared_revision === revisionId) && !project.hidden && this.projectOwnerAccess(project.owner)?.state === "admitted")), 404, "Preview not found");
     return this.revision(id,revisionId);
   }
   preview(member:Member,id:string,revisionId:string){return this.assets.get(this.previewRevision(member,id,revisionId).source_hash);}
-  publicationCandidates(member: Member) { this.host(member); return this.db.query("SELECT p.id,p.title,p.shared_revision,r.number,r.source_hash,m.name author,p.owner authorPubkey,p.origin_project,p.origin_revision FROM projects p JOIN revisions r ON r.id=p.shared_revision JOIN members m ON m.pubkey=p.owner JOIN consent c ON c.project_id=p.id AND c.revision_id=r.id WHERE p.hidden=0 AND p.workshop_id=? AND c.granted=1").all(this.id).filter((p:any)=>this.projectOwnerAccess(p.authorPubkey)?.state==='admitted'); }
+  publicationCandidates(member: Member) { this.host(member); return this.db.query("SELECT p.id,p.title,p.shared_revision,r.number,r.source_hash,m.name author,p.owner authorPubkey,p.origin_project,p.origin_revision FROM projects p JOIN revisions r ON r.id=p.shared_revision JOIN members m ON m.pubkey=p.owner JOIN consent c ON c.project_id=p.id AND c.revision_id=r.id WHERE p.hidden=0 AND p.deleted_at IS NULL AND p.workshop_id=? AND c.granted=1").all(this.id).filter((p:any)=>this.projectOwnerAccess(p.authorPubkey)?.state==='admitted'); }
 }

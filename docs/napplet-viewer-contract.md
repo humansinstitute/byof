@@ -95,4 +95,17 @@ audit rows for rename, activation, restore and sharing. Host conversation change
 continue through the separately audited host-follow-up route. Public publication
 consent remains owner-only and cannot be supplied by an administrator.
 
+Only a signed-in site administrator sees **Delete Napplet** in that settings
+dialog. The destructive form identifies the Napplet, requires its exact current
+title and revision, uses the normal CSRF-protected request path and does not
+remove the window until the server commits. Active/uncertain requests, native
+builder deletion and public publication claims fence deletion. The committed
+operation tombstones the project, removes its saved Canvas object and app-local
+Napplet data, revokes consent and hosted inclusion, and closes all private,
+public-hosted and bridge access paths. Immutable revisions, request/guidance/
+engine history, fork lineage, wallet records and admin audit rows remain intact;
+their database triggers are not bypassed. Content-addressed assets, native
+transcripts and externally stored publication objects are not erased or claimed
+as erased by this action. Repeating a committed request returns not found.
+
 Authenticated preview responses and fresh runtime bootstraps inject the [Napplet bridge v1](napplet-bridge-api.md) before app scripts. Identity consent, participant signing and durable per-user project storage travel over a channel bound to the existing frame. Both paths use the same opaque-origin sandbox and CSP: direct HTTPS/WSS service calls are allowed, while remote code, frames, objects and form destinations remain blocked. Removing/replacing a frame revokes its grants, while resize/minimize/pop-out preserve its channel with the document.

@@ -3,7 +3,7 @@ import {mkdtempSync,rmSync,writeFileSync,existsSync} from 'node:fs';
 import {nip19,generateSecretKey,getPublicKey,finalizeEvent} from 'nostr-tools';
 import {verifyDelivery} from '../src/pipeline/receiver.ts';
 import {sha256} from '../src/assets.ts';
-import {TowerStorageClient,type StorageTarget} from '../src/tower-storage-client.ts';
+import {TowerStorageClient,storedContentLimit,type StorageTarget} from '../src/tower-storage-client.ts';
 import {authorizeStorageHttp,type ManagedStorageScope,type StorageJobAuthority} from '../src/pipeline/managed-storage-transport.ts';
 import {application} from '../src/application.ts';
 import {dispatchFollowup} from '../src/pipeline/followup-dispatch.ts';
@@ -47,6 +47,27 @@ test('Tower adapter verifies actual bytes, immutable completed retries and owner
  await client.uploadAndVerify(objectId,'v1.html',bytes);expect(writes).toBe(1);
  tampered=true;await expect(client.uploadAndVerify(objectId,'v1.html',bytes)).rejects.toThrow('readback');
  tampered=false;wrongOwner=true;await expect(client.uploadAndVerify(objectId,'v1.html',bytes)).rejects.toThrow('binding');
+});
+test('Tower readback keeps HTML bounded while accepting advertised-size raster attachments and rejecting length, body and MIME changes',async()=>{
+ const image=Buffer.alloc(300_001,17),imageHash=sha256(image),imageId=crypto.randomUUID();let completed=false,stored=Buffer.alloc(0);
+ const metadata=(contentType='image/png',size=image.length,hash=imageHash)=>({object_id:imageId,owner_npub:other,created_by_npub:npub,owner_group_id:null,access_group_ids:[],file_name:'screenshot.png',content_type:contentType,is_public:false,completed_at:completed?'now':null,sha256_hex:hash,size_bytes:size});
+ const request=async(url:string,method:string,body?:any)=>{
+  if(url.endsWith('/storage/prepare'))return Response.json({object_id:imageId,is_public:false,owner_npub:other,identity:{workspace_id:target.workspaceId}});
+  if(url.endsWith('/complete')){expect(body.sha256_hex).toBe(imageHash);completed=true;return Response.json({});}
+  if(method==='PUT'){stored=Buffer.from(body.base64_data,'base64');return Response.json({});}
+  if(url.endsWith('/content'))return new Response(stored,{headers:{'content-length':String(stored.length)}});
+  return Response.json(metadata());
+ };
+ const client=new TowerStorageClient(target,request),prepared=await client.prepare('screenshot.png',image,'image/png');expect(prepared).toBe(imageId);
+ const result=await client.uploadAndVerify(prepared,'screenshot.png',image,'image/png');expect(result.bytes).toEqual(new Uint8Array(image));expect(result.artifact.sizeBytes).toBe(image.length);
+ expect(storedContentLimit('text/html')).toBe(256_000);expect(storedContentLimit('image/png')).toBe(8_000_000);expect(storedContentLimit('image/svg+xml')).toBe(0);
+ const exactMetadata=async()=>Response.json(metadata()),read=(response:Response)=>new TowerStorageClient(target,async(url)=>url.endsWith('/content')?response:exactMetadata()).readAndVerify(imageId,'screenshot.png',imageHash,image.length,'image/png');
+ await expect(read(new Response(image,{headers:{'content-length':String(image.length+1)}}))).rejects.toThrow('length_mismatch');
+ await expect(read(new Response(image.subarray(0,-1)))).rejects.toThrow('readback_mismatch');
+ const oversized=8_000_001,overClient=new TowerStorageClient(target,async()=>Response.json(metadata('image/png',oversized,'a'.repeat(64))));
+ await expect(overClient.readAndVerify(imageId,'screenshot.png','a'.repeat(64),oversized,'image/png')).rejects.toThrow('size_denied');
+ const badMime=new TowerStorageClient(target,async()=>Response.json(metadata('image/svg+xml',image.length,imageHash)));
+ await expect(badMime.readAndVerify(imageId,'screenshot.png',imageHash,image.length,'image/svg+xml')).rejects.toThrow('size_denied');
 });
 test('storage failure stays pending, verified signed recovery registers exactly one remote version without another native turn',async()=>{
  const dir=mkdtempSync('/private/tmp/byo-storage-'),owner='a'.repeat(64),app=application({dataDir:dir,hostPubkey:null,origin:null,version:'test'});

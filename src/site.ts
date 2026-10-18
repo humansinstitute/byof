@@ -85,7 +85,7 @@ export class Site {
     }
     canvasOverview(workshopId: string) {
         const legacy = workshopId === this.legacy();
-        const projects = (this.db.query('SELECT owner FROM projects WHERE workshop_id=? AND hidden=0').all(workshopId) as any[]).filter(project => this.projectOwnerAdmitted(workshopId,project.owner));
+        const projects = (this.db.query('SELECT owner FROM projects WHERE workshop_id=? AND hidden=0 AND deleted_at IS NULL').all(workshopId) as any[]).filter(project => this.projectOwnerAdmitted(workshopId,project.owner));
         const row = this.db.query('SELECT objects_json FROM workshop_boards WHERE workshop_id=?').get(workshopId) as any;
         let stored: any[] = [];
         try { const parsed = row ? JSON.parse(row.objects_json) : []; stored = Array.isArray(parsed) ? parsed : []; } catch { stored = []; }

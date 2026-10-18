@@ -1133,7 +1133,13 @@ document.addEventListener('click', async event => {
     if (action === 'napplet-settings' || action === 'napplet-options') {
       const p = [...state.projects, ...(state.board?.napplets||[])].find(p => p.id === id), owner=(p.owner||p.authorPubkey)===me.pubkey,canEdit=owner||me.host;
       if (action === 'napplet-settings' && !canEdit) throw Error('Napplet administrator access required');
-      dialog(`<h2>${esc(p.title)}</h2><div class="napplet-owner-actions">${canEdit ? button('rename','Rename',id)+button('edit-napplet',owner?'Edit your Napplet!':'Edit Napplet as administrator',id) : ''}${button('fork','Fork this Napplet and make it your own!',id)}</div><p id="napplet-action-error" class="error" role="alert" hidden></p>`,null,true);
+      dialog(`<h2>${esc(p.title)}</h2><div class="napplet-owner-actions">${canEdit ? button('rename','Rename',id)+button('edit-napplet',owner?'Edit your Napplet!':'Edit Napplet as administrator',id) : ''}${button('fork','Fork this Napplet and make it your own!',id)}${me.admin?button('confirm-napplet-delete','Delete Napplet',id,'danger'):''}</div><p id="napplet-action-error" class="error" role="alert" hidden></p>`,null,true);
+    }
+    if(action==='confirm-napplet-delete'){
+      if(!me.admin)throw Error('Site administrator access required');
+      const p=[...state.projects,...(state.board?.napplets||[])].find(project=>project.id===id);if(!p)throw Error('Napplet not found');
+      dialog(`<h2>Delete ${esc(p.title)}?</h2><p>This permanently removes this Napplet from Freedom Tools, including its Canvas window and app-local data. Immutable audit and build history are retained. External publication artifacts and native transcripts are not erased.</p><form id="napplet-delete-form" data-id="${esc(p.id)}" data-title="${esc(p.title)}" data-revision="${esc(p.current_revision)}"><label for="napplet-delete-confirm">Type <strong>${esc(p.title)}</strong> to permanently delete this Napplet</label><input id="napplet-delete-confirm" autocomplete="off" spellcheck="false" required><p id="napplet-delete-error" class="error" role="alert" hidden></p><div class="actions"><button type="button" data-a="close">Cancel</button><button id="napplet-delete-submit" class="danger" type="submit" disabled>Permanently delete Napplet</button></div></form>`,target);
+      $('#napplet-delete-confirm').focus();
     }
     if (action === 'rename') { const p = screen === 'builder' ? detail.project : [...state.projects, ...(state.board?.napplets||[])].find(p => p.id === id); dialog(`<h2>Rename Napplet</h2><form id="rename-form" data-id="${esc(p.id)}"><label for="napplet-title">Napplet title</label><input id="napplet-title" maxlength="120" required value="${esc(p.title)}" aria-describedby="rename-error"><p id="rename-error" class="error" role="alert" hidden></p><button class="primary" type="submit">Save name</button></form>`,null,true); $('#napplet-title').focus(); }
     if (action === 'confirm-native-delete') dialog(`<h2>Delete ${esc(detail.agentName)} native history?</h2><p>This deletes the native transcript and runtime records. Provider metadata indexes remain. Your app messages and game versions are preserved.</p>${button('delete-native-builder','Delete native transcript and runtime')}`);
@@ -1235,6 +1241,11 @@ document.addEventListener('submit', async event => {
       nappletHost.revoke();clearTimeout(reconnectTimer);socket?.close();socket=null;selectedWorkshop='';state=null;detail=null;people=null;publication=null;storage=null;towerWorkspaces=[];managementWorkshop=null;if(promptWorkshopId===id)promptWorkshopId=null;
       workshops=workshops.filter(w=>w.id!==id);cacheWorkshops(workshops);$('#dialog').close();await workshopsPage();toast(`${title} was deleted from Freedom Tools. External datasets and published artifacts were left unchanged.`);
     }
+    if(event.target.id==='napplet-delete-form'){
+      const id=event.target.dataset.id,title=event.target.dataset.title,expectedRevisionId=event.target.dataset.revision;
+      await api(`projects/${id}`,{confirmTitle:$('#napplet-delete-confirm').value,confirmPermanent:true,expectedRevisionId},'DELETE');
+      $('#dialog').close();await page();toast(`${title} was deleted from Freedom Tools. This action did not delete external publication artifacts or change the native lifecycle.`);
+    }
     if(event.target.id==='join-form'){await api('workshops/join',{invitation:$('#join-invitation').value});$('#dialog').close();await page();connect();}
     if(event.target.id==='profile-form'){profile=await profiles.saveLocal(me.pubkey,{name:$('#profile-name').value,picture:$('#profile-picture').value,about:$('#profile-about').value});if(me.identity_type==='temporary'){await api('profile',{name:profile.name,picture:profile.picture,about:profile.about});me.name=profile.name;}render();toast('Profile saved on this device');}
     if(event.target.id==='tower-form'){await api('site/towers',{label:$('#tower-label').value,origin:$('#tower-origin').value});await siteAdmin();toast('Tower registered; not yet authorized');}
@@ -1246,7 +1257,7 @@ document.addEventListener('submit', async event => {
       saveCanvasDraft({title,introduction,owner});canvasSetup.error='';canvasSetup.step=2;renderCanvasSetup();
     }
     if (event.target.id === 'settings-form') { state = await api('host/settings',{pictures:$('#pictures').value.split('\n').map(v=>v.trim()).filter(Boolean),title:$('#title').value,introduction:$('#intro').value,lightning:$('#address').value,support_label:$('#support-label').value.trim(),admission:$('#admission').value,paused:!!state.room.paused}); await page(); toast('BYOF Canvas settings saved'); }
-  } catch (error) { toast(error.message);const feedback=event.target.id==='rename-form'?$('#rename-error'):event.target.id==='canvas-delete-form'?$('#canvas-delete-error'):null;if(feedback){feedback.hidden=false;feedback.textContent=error.message;(event.target.id==='rename-form'?$('#napplet-title'):$('#canvas-delete-confirm'))?.focus();} } finally { endBusy(); }
+  } catch (error) { toast(error.message);const feedback=event.target.id==='rename-form'?$('#rename-error'):event.target.id==='canvas-delete-form'?$('#canvas-delete-error'):event.target.id==='napplet-delete-form'?$('#napplet-delete-error'):null;if(feedback){feedback.hidden=false;feedback.textContent=error.message;(event.target.id==='rename-form'?$('#napplet-title'):event.target.id==='canvas-delete-form'?$('#canvas-delete-confirm'):$('#napplet-delete-confirm'))?.focus();} } finally { endBusy(); }
 });
 document.addEventListener('change', async event => {
   if(event.target.name==='canvas-workspace'){const workspace=towerWorkspaces.find(item=>item.identity?.workspace_id===event.target.value);saveCanvasDraft({workspaceId:event.target.value,workspaceLabel:workspace?.label||'Workspace'});canvasSetup.error='';renderCanvasSetup();return;}
@@ -1263,7 +1274,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&menu){menu=false;re
 document.addEventListener('click',e=>{if(menu&&!e.composedPath().includes($('#identity'))){menu=false;render();}});
 document.addEventListener('error',e=>{if(e.target instanceof HTMLImageElement){const avatar=e.target.closest('.avatar');if(avatar)avatar.textContent=me?initials(profileName(me)):'WP';else e.target.hidden=true;}},true);
 
-document.addEventListener('input',event=>{if(event.target.id==='workshop-code'&&screen==='start')rememberJoinCode(event.target.value);if(event.target.closest('#profile-form'))$('#profile-form').dataset.dirty='true';if(event.target.id==='canvas-delete-confirm'){const submit=$('#canvas-delete-submit');submit.disabled=event.target.value!=='CONFIRM';$('#canvas-delete-error').hidden=true;}});
+document.addEventListener('input',event=>{if(event.target.id==='workshop-code'&&screen==='start')rememberJoinCode(event.target.value);if(event.target.closest('#profile-form'))$('#profile-form').dataset.dirty='true';if(event.target.id==='canvas-delete-confirm'){const submit=$('#canvas-delete-submit');submit.disabled=event.target.value!=='CONFIRM';$('#canvas-delete-error').hidden=true;}if(event.target.id==='napplet-delete-confirm'){const submit=$('#napplet-delete-submit'),form=event.target.form;submit.disabled=event.target.value!==form.dataset.title;$('#napplet-delete-error').hidden=true;}});
 document.addEventListener('focus',event=>{if(event.target.id==='workshop-code'&&event.target.value.length===event.target.maxLength)event.target.select();},true);
 
 $('#dialog').addEventListener('cancel',()=>{towerSetupEpoch++;});

@@ -13,7 +13,7 @@ function fixture(options: { timeoutMs?: number } = {}) {
   const directory = mkdtempSync(tmpdir() + '/ippon-capability-'); directories.push(directory);
   const ownerKey = generateSecretKey(), calls: { url: string; init: RequestInit }[] = [];
   let mode = 'ok', created = 0;
-  const secret = 'server_only_secret_' + 'a'.repeat(40), invoice = 'lnbc1' + 'q'.repeat(40), quote = 'quote_abcdefgh';
+  const secret = 'server_only_secret_' + 'a'.repeat(40), invoice = 'lnbc1' + 'q'.repeat(40), quote = 'quote_abcdefgh', paymentQuote = 'payment_abcdefgh';
   const wallet = (key = secret) => ({ name: 'Managed', access_key: key, mint: 'https://mint.minibits.cash/Bitcoin', unit: 'sat', balance: 0, pending_balance: 0, limits: null, unexpected: 'must not cross' });
   const upstream = async (input: string | URL | Request, init: RequestInit = {}) => {
     const url = String(input); calls.push({ url, init });
@@ -27,6 +27,8 @@ function fixture(options: { timeoutMs?: number } = {}) {
     if (parsed.pathname === '/v1/wallet' && init.method === 'GET') return Response.json(wallet(secret + '1'));
     if (parsed.pathname === '/v1/wallet/deposit' && init.method === 'POST') return Response.json({ quote, request: invoice, state: 'UNPAID', expiry: null, access_key: secret, unexpected: { secret } });
     if (parsed.pathname === `/v1/wallet/deposit/${quote}` && init.method === 'GET') return Response.json({ quote, request: invoice, state: 'ISSUED', expiry: 123456, access_key: secret, unexpected: { secret } });
+    if (parsed.pathname === '/v1/wallet/pay' && init.method === 'POST') return Response.json({ quote: paymentQuote, amount: JSON.parse(String(init.body)).amount, fee_reserve: 2, state: 'PENDING', payment_preimage: null, expiry: 123456, access_key: secret, unexpected: { secret } });
+    if (parsed.pathname === `/v1/wallet/pay/${paymentQuote}` && init.method === 'GET') return Response.json({ quote: paymentQuote, amount: 21, fee_reserve: 2, state: 'PAID', payment_preimage: 'preimage-safe', expiry: 123456, access_key: secret, unexpected: { secret } });
     return Response.json({ error: 'missing' }, { status: 404 });
   };
   const config={ dataDir: directory, origin: null, hostPubkey: getPublicKey(ownerKey), version: 'test', ipponBaseUrl: 'https://ippon.test' },fixtures={ ipponFetch: upstream, ipponTimeoutMs: options.timeoutMs };
@@ -38,7 +40,7 @@ function fixture(options: { timeoutMs?: number } = {}) {
   }
   async function login(key: Uint8Array) { const challenge = await call('challenge', {}), result = await call('login', { challengeId: challenge.data.id, event: finalizeEvent(challenge.data.event, key), identityType: 'extension' }); return { cookie: result.cookie, csrf: result.data.csrf }; }
   async function open(project: any, account: Account, scope?: string) { const preview = await call(`projects/${project.id}/preview?revision=${project.current_revision}`, undefined, account, scope); return call('napplet/open', { projectId: project.id, revisionId: project.current_revision, documentId: preview.data.documentId }, account, scope); }
-  return { get app(){return app;}, call, login, open, ownerKey, calls, secret, invoice, quote, setMode: (value: string) => { mode = value; }, created: () => created, restart:()=>{app.db.close();app=application(config,fixtures);} };
+  return { get app(){return app;}, call, login, open, ownerKey, calls, secret, invoice, quote, paymentQuote, setMode: (value: string) => { mode = value; }, created: () => created, restart:()=>{app.db.close();app=application(config,fixtures);} };
 }
 
 test('managed Ippon flow fixes the upstream contract, strips secrets and persists one scoped wallet', async () => {
@@ -50,7 +52,7 @@ test('managed Ippon flow fixes the upstream contract, strips secrets and persist
     expect(connected.status).toBe(200); expect(connected.raw).not.toContain(f.secret); expect(connected.data.wallet).toEqual({ name: 'Managed', mint: 'https://mint.minibits.cash/Bitcoin', unit: 'sat', balance: 0, pendingBalance: 0, limits: null });
     expect((await f.call('napplet/cashu', { token, method: 'connect' }, account)).status).toBe(200); expect(f.created()).toBe(1);
     const deposit = await f.call('napplet/cashu', { token, method: 'createDeposit', amount: 21 }, account);
-    expect(deposit.data).toEqual({ quote: f.quote, invoice: f.invoice, state: 'UNPAID', expiry: null }); expect(deposit.raw).not.toContain(f.secret);
+    expect(deposit.data).toMatchObject({ quote: f.quote, invoice: f.invoice, state: 'UNPAID', expiry: null }); expect(deposit.data.qr).toStartWith('data:image/gif;base64,'); expect(deposit.raw).not.toContain(f.secret);
     const issued = await f.call('napplet/cashu', { token, method: 'checkDeposit', quote: f.quote }, account);
     expect(issued.data.state).toBe('ISSUED'); expect(issued.raw).not.toContain(f.secret);
     const status = await f.call('napplet/cashu', { token, method: 'status' }, account);
@@ -66,6 +68,46 @@ test('managed Ippon flow fixes the upstream contract, strips secrets and persist
     }
     for(const file of ['public/napplet.d.ts','public/napplet-host.js','templates/napplet-client.js','src/starters.ts'])expect(await Bun.file(file).text()).not.toContain(f.secret);
     expect(await Bun.file('public/napplet-host.js').text()).not.toContain('ipponBaseUrl');
+  } finally { f.app.db.close(); }
+});
+
+test('outgoing payments require one live exact confirmation preview and track only scoped safe quote state', async () => {
+  const f = fixture();
+  try {
+    const account = await f.login(f.ownerKey), project = (await f.call('projects', { starterId: 'cashu' }, account)).data.project, token = (await f.open(project, account)).data.token;
+    await f.call('napplet/cashu', { token, method: 'connect' }, account);
+    const before = f.calls.length;
+    expect((await f.call('napplet/cashu', { token, method: 'pay', lightningAddress: 'bitcoinbushbash@walletofsatoshi.com', amount: 21, unit: 'sat', confirmationToken: crypto.randomUUID() }, account)).status).toBe(403);
+    expect(f.calls.length).toBe(before);
+    const preview = await f.call('napplet/cashu', { token, method: 'paymentPreview', lightningAddress: 'BitcoinBushBash@WalletOfSatoshi.com', amount: 21 }, account);
+    expect(preview.data).toMatchObject({ destinationType: 'lightningAddress', destination: 'BitcoinBushBash@walletofsatoshi.com', amount: 21, unit: 'sat' });
+    expect(preview.data.confirmationToken).toMatch(/^[a-f0-9-]{36}$/); expect(f.calls.length).toBe(before);
+    expect((await f.call('napplet/cashu', { token, method: 'paymentPreview', lightningAddress: 'other@example.com', amount: 1 }, account)).status).toBe(409);
+    const paid = await f.call('napplet/cashu', { token, method: 'pay', lightningAddress: preview.data.destination, amount: 21, unit: 'sat', confirmationToken: preview.data.confirmationToken }, account);
+    expect(paid.data).toEqual({ quote: f.paymentQuote, amount: 21, feeReserve: 2, state: 'PENDING', paymentPreimage: null, expiry: 123456 });
+    const upstream = f.calls.at(-1)!; expect(new URL(upstream.url).pathname).toBe('/v1/wallet/pay'); expect(JSON.parse(String(upstream.init.body))).toEqual({ lightning_address: preview.data.destination, amount: 21, unit: 'sat' });
+    expect((await f.call('napplet/cashu', { token, method: 'pay', lightningAddress: preview.data.destination, amount: 21, unit: 'sat', confirmationToken: preview.data.confirmationToken }, account)).status).toBe(403);
+    const status = await f.call('napplet/cashu', { token, method: 'checkPayment', quote: f.paymentQuote }, account);
+    expect(status.data).toEqual({ quote: f.paymentQuote, amount: 21, feeReserve: 2, state: 'PAID', paymentPreimage: 'preimage-safe', expiry: 123456 }); expect(status.raw).not.toContain(f.secret);
+    const fork = (await f.call('projects', { forkProjectId: project.id, idempotencyKey: 'payment-scope' }, account)).data.project, forkToken = (await f.open(fork, account)).data.token;
+    expect((await f.call('napplet/cashu', { token: forkToken, method: 'checkPayment', quote: f.paymentQuote }, account)).status).toBe(409);
+  } finally { f.app.db.close(); }
+});
+
+test('payment validation, cancellation and expiry fail closed before the upstream pay call', async () => {
+  const f = fixture();
+  try {
+    const account = await f.login(f.ownerKey), project = (await f.call('projects', { starterId: 'cashu' }, account)).data.project, token = (await f.open(project, account)).data.token;
+    await f.call('napplet/cashu', { token, method: 'connect' }, account); const before = f.calls.length;
+    for (const fields of [{ lightningAddress: 'bad', amount: 21 }, { bolt11Request: 'not-an-invoice', amount: 21 }, { lightningAddress: 'a@example.com', bolt11Request: f.invoice, amount: 21 }, { lightningAddress: 'a@example.com', amount: 0 }])
+      expect((await f.call('napplet/cashu', { token, method: 'paymentPreview', ...fields }, account)).status).toBe(400);
+    expect(f.calls.length).toBe(before);
+    const cancelled = await f.call('napplet/cashu', { token, method: 'paymentPreview', bolt11Request: f.invoice, amount: 21 }, account);
+    await f.call('napplet/cashu', { token, method: 'cancelPaymentPreview', confirmationToken: cancelled.data.confirmationToken }, account);
+    expect((await f.call('napplet/cashu', { token, method: 'pay', bolt11Request: f.invoice, amount: 21, unit: 'sat', confirmationToken: cancelled.data.confirmationToken }, account)).status).toBe(403);
+    const expiring = await f.call('napplet/cashu', { token, method: 'paymentPreview', bolt11Request: f.invoice, amount: 21 }, account), originalNow = Date.now;
+    try { Date.now = () => originalNow() + 56_000; expect((await f.call('napplet/cashu', { token, method: 'pay', bolt11Request: f.invoice, amount: 21, unit: 'sat', confirmationToken: expiring.data.confirmationToken }, account)).status).toBe(403); } finally { Date.now = originalNow; }
+    expect(f.calls.length).toBe(before);
   } finally { f.app.db.close(); }
 });
 

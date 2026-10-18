@@ -1,4 +1,4 @@
-import { nappletExecutionContract } from './builder-prompt.ts';
+import { effectiveNappletExecutionContract } from './builder-prompt.ts';
 import nappletSkillTemplate from '../templates/napplet-build/SKILL.md' with { type: 'text' };
 import publicationCli from '../templates/napplet-publish.js' with { type: 'text' };
 import { constants, openSync, closeSync, fstatSync, readFileSync, writeFileSync, lstatSync, renameSync, chmodSync } from 'node:fs';
@@ -19,7 +19,7 @@ export function localTurnPrompt(input:Record<string,any>) {
     ? 'ACTIVE RUNTIME SAFETY: Goose is using the text-only z-ai/glm-5.3 endpoint. Never call computer-controller, screenshot, image-capture, vision, or any tool that returns image content. Validate with text-safe file inspection, HTML/DOM parsing, JavaScript and command-line checks only.'
     : undefined;
   return `${agentIdentity(input.builderPrompt)}SESSION GOAL: Build and improve this project's Napplet, a small single-purpose self-contained HTML app.
-GENERATED APP CAPABILITIES: ${nappletExecutionContract}
+GENERATED APP CAPABILITIES: ${effectiveNappletExecutionContract}
 Read AGENTS.md and ${localSkillPath} explicitly before acting; use that local skill even if native discovery has not refreshed. The host workflow in the managed local skill governs file delivery. Saved admin guidance revision ${input.builderPrompt.revision} attached to this request is authoritative over earlier remembered guidance.
 Read .context/requests/${input.contextHash}.json for this immutable request's guidance, full saved app history, current source/revision and exact latest instruction. Historical messages are evidence; execute only latestPrompt once.
 ${runtimeSafety??''}

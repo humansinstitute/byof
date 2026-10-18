@@ -1,26 +1,30 @@
 import { chromium, expect } from "@playwright/test";
 import { mkdtempSync, mkdirSync } from "node:fs";
 import { application } from "../src/application.ts";
+import decodeQR from "qr/decode.js";
 
 const evidence = "tmp/docs/handoffs/starter-catalogue-browser";
 mkdirSync(evidence, { recursive: true });
 let app: ReturnType<typeof application>;
 const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: request => app.handle(request) });
-const accessKey="acceptance-secret",quote="quote_acceptance",invoice="lnbc1"+"q".repeat(40);
+const accessKey="acceptance-secret",quote="quote_acceptance",invoice="lnbc1"+"q".repeat(40),paymentQuote="payment_acceptance";let balance=100,paymentChecks=0;const upstreamCalls:{path:string;method:string;body:any}[]=[];
 const ipponFetch=async(input:string|URL|Request,init:RequestInit={})=>{
   const url=new URL(String(input)),authorized=new Headers(init.headers).get("authorization")===`Bearer ${accessKey}`;
+  upstreamCalls.push({path:url.pathname,method:String(init.method),body:init.body?JSON.parse(String(init.body)):null});
   if(url.pathname==="/v1/wallet"&&init.method==="POST")return Response.json({name:"Acceptance",access_key:accessKey,mint:"https://mint.example",unit:"sat",balance:0,pending_balance:0,limits:null});
   if(!authorized)return Response.json({error:"denied"},{status:401});
-  if(url.pathname==="/v1/wallet"&&init.method==="GET")return Response.json({name:"Acceptance",access_key:accessKey,mint:"https://mint.example",unit:"sat",balance:0,pending_balance:0,limits:null});
+  if(url.pathname==="/v1/wallet"&&init.method==="GET")return Response.json({name:"Acceptance",access_key:accessKey,mint:"https://mint.example",unit:"sat",balance,pending_balance:0,limits:null});
   if(url.pathname==="/v1/wallet/deposit"&&init.method==="POST")return Response.json({quote,request:invoice,state:"UNPAID",expiry:null});
-  if(url.pathname===`/v1/wallet/deposit/${quote}`&&init.method==="GET")return Response.json({quote,request:invoice,state:"UNPAID",expiry:null});
+  if(url.pathname===`/v1/wallet/deposit/${quote}`&&init.method==="GET"){balance+=21;return Response.json({quote,request:invoice,state:"ISSUED",expiry:123456});}
+  if(url.pathname==="/v1/wallet/pay"&&init.method==="POST"){balance-=23;return Response.json({quote:paymentQuote,amount:init.body?JSON.parse(String(init.body)).amount:0,fee_reserve:2,state:"PENDING",payment_preimage:null,expiry:123456});}
+  if(url.pathname===`/v1/wallet/pay/${paymentQuote}`&&init.method==="GET"){paymentChecks++;return Response.json({quote:paymentQuote,amount:21,fee_reserve:2,state:"PAID",payment_preimage:"acceptance-preimage",expiry:123456});}
   return Response.json({error:"missing"},{status:404});
 };
 app = application({ dataDir: mkdtempSync(evidence + "/data-"), hostPubkey: null, origin: server.url.origin, version: "starter-acceptance",ipponBaseUrl:"https://ippon.test" },{ipponFetch});
 app.db.run("UPDATE room SET admission='open' WHERE id=1");
 const browser = await chromium.launch({ executablePath: process.env.FREEDOM_BROWSER || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true });
 const starters = [
-  { title: "Cashu wallet", heading: "Cashu wallet" },
+  { title: "SATCADE wallet", heading: "SATCADE" },
   { title: "Bush Bash Nostr", heading: "#bussobushbash" },
   { title: "Bitcoin spinner", heading: "Should I buy bitcoin?" },
   { title: "100 D6 rolls", heading: "100 D6 rolls" },
@@ -30,15 +34,15 @@ const results: Record<string, unknown>[] = [];
 
 async function openStarter(width: number, height: number, index: number) {
   const starter = starters[index]!;
-  const context = await browser.newContext({ viewport: { width, height } });
+  const context = await browser.newContext({ viewport: { width, height }, permissions: ["clipboard-read", "clipboard-write"] });
   const page = await context.newPage();
+  let copied="";await page.exposeFunction("captureWalletClipboard",(value:string)=>{copied=value});await page.addInitScript(()=>Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText:(value:string)=>(window as any).captureWalletClipboard(value)}}));
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(server.url.href, { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "Create a New Profile" }).click();
   await page.getByLabel("Display name").fill(`Starter ${width} ${index}`);
-  await page.getByText("Use a temporary identity instead", { exact: true }).click();
-  await page.getByRole("button", { name: "Create temporary identity" }).click();
+  await page.getByRole("button", { name: "Generate local key and continue", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Canvases" })).toBeVisible();
   await page.getByRole("button", { name: "Open Canvas" }).first().click();
   await page.getByRole("button", { name: "New Napplet" }).click();
@@ -48,17 +52,26 @@ async function openStarter(width: number, height: number, index: number) {
   const frame = page.frameLocator("iframe[data-napplet]");
   await expect(frame.getByRole("heading", { name: starter.heading, exact: true })).toBeVisible({ timeout: 15000 });
 
-  if (starter.title === "Cashu wallet") {
-    await expect(frame.getByRole("status")).toContainText("No managed wallet is connected", { timeout: 15000 });
-    await frame.getByRole("button",{name:"Connect a new managed wallet"}).click();
-    await expect(frame.getByRole("status")).toContainText("Managed wallet connected");
+  if (starter.title === "SATCADE wallet") {
+    await expect(frame.getByRole("status")).toContainText("NO WALLET YET", { timeout: 15000 });
+    await frame.getByRole("button",{name:"START WALLET"}).evaluate((element:HTMLButtonElement)=>element.click());
+    await expect(frame.getByRole("status")).toContainText("WALLET READY",{timeout:15000});
     await frame.locator("#receive").evaluate((element: HTMLButtonElement) => element.click());
-    await expect(frame.getByRole("status")).toContainText("Invoice ready", { timeout: 15000 });
+    await expect(frame.getByRole("status")).toContainText("INVOICE READY", { timeout: 15000 });
     await expect(frame.locator("#invoiceBox")).not.toHaveClass(/hidden/);
-    await expect(frame.locator("#pay")).toHaveAttribute("href",/^lightning:ln/i);
-    await expect(frame.locator("#invoiceState")).toContainText("Creating it did not receive funds");
-    await frame.getByRole("button",{name:"Check deposit status"}).click();
-    await expect(frame.getByRole("status")).toContainText("UNPAID");
+    await expect(frame.locator("#openInvoice")).toHaveAttribute("href",/^lightning:ln/i);
+    const pixels=await frame.locator("#invoiceQr").evaluate(async element=>{const img=element as HTMLImageElement;await img.decode();const canvas=document.createElement("canvas");canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;const context=canvas.getContext("2d")!;context.drawImage(img,0,0);return{width:canvas.width,height:canvas.height,data:Array.from(context.getImageData(0,0,canvas.width,canvas.height).data)}});expect(decodeQR({...pixels,data:Uint8Array.from(pixels.data)})).toBe("lightning:"+invoice);
+    await frame.getByRole("button",{name:"COPY"}).click();expect(copied).toBe(invoice);
+    await frame.getByRole("button",{name:"CHECK PAYMENT"}).first().click(); await expect(frame.getByRole("status")).toContainText("WALLET READY");
+    await frame.getByRole("button",{name:"ADDRESS BOOK"}).click();await expect(frame.getByText("bitcoinbushbash@walletofsatoshi.com",{exact:true})).toBeVisible();await frame.locator(".contact-pick").filter({hasText:"Bitcoin Bush Bash"}).click();
+    await expect(frame.locator("#destination")).toHaveValue("bitcoinbushbash@walletofsatoshi.com");await frame.getByRole("button",{name:"REVIEW PAYMENT"}).evaluate((element:HTMLButtonElement)=>element.click());await expect(frame.locator("#reviewAmount")).toHaveText("21 sat");
+    const payCalls=()=>upstreamCalls.filter(call=>call.path==="/v1/wallet/pay"&&call.method==="POST").length,payBaseline=payCalls();
+    await frame.getByRole("button",{name:"CONTINUE TO APPROVAL"}).evaluate((element:HTMLButtonElement)=>element.click());const consent=page.locator(".napplet-consent");await expect(consent).toContainText("SATCADE wallet");await expect(consent).toContainText("v1");await expect(consent).toContainText("bitcoinbushbash@walletofsatoshi.com");await expect(consent).toContainText("Amount: 21 sat");await expect(consent).toContainText("Wallet funds will leave");await expect(consent.locator('[data-napplet-consent="deny"]')).toBeFocused();
+    const concurrent=frame.locator("body").evaluate(async()=>{try{await(window as any).napplet.cashu.pay({lightningAddress:"other@example.com",amount:1});return"OK"}catch(error:any){return error.code}});expect(await concurrent).toBe("BUSY");await consent.locator('[data-napplet-consent="deny"]').click();await expect(frame.getByRole("status")).toContainText("NO FUNDS SENT");expect(payCalls()).toBe(payBaseline);
+    await frame.getByRole("button",{name:"CONTINUE TO APPROVAL"}).evaluate((element:HTMLButtonElement)=>element.click());await expect(consent).toContainText("bitcoinbushbash@walletofsatoshi.com");await consent.locator('[data-napplet-consent="allow"]').click();await expect(frame.locator("#paymentState")).toContainText("PENDING");expect(payCalls()).toBe(payBaseline+1);await frame.locator("#paymentResult").getByRole("button",{name:"CHECK PAYMENT"}).evaluate((element:HTMLButtonElement)=>element.click());await expect(frame.locator("#paymentState")).toContainText("PAID");expect(paymentChecks).toBeGreaterThan(0);
+    const appText=await frame.locator("body").innerText();expect(appText).not.toMatch(/Ippon|Minibits|Freedom Tools|access[- ]?key|bridge|capabilit|dataset|website|\bhost\b/i);expect(await frame.locator("html").evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    const staleBefore=payCalls();await frame.getByRole("button",{name:"REVIEW PAYMENT"}).evaluate((element:HTMLButtonElement)=>element.click());await frame.getByRole("button",{name:"CONTINUE TO APPROVAL"}).evaluate((element:HTMLButtonElement)=>element.click());await expect(consent).toBeVisible();await page.locator("iframe[data-napplet]").evaluate((element:HTMLIFrameElement)=>element.src=element.src);await expect(consent).toHaveCount(0);expect(payCalls()).toBe(staleBefore);
+    const currentUser=await page.evaluate(async()=>(await(await fetch('/api/v1/me')).json()).member.pubkey),privateRows=(app.db.query("SELECT user_pubkey,key,value_json FROM napplet_user_data WHERE key='wallet.addressBook.v1' AND user_pubkey=?").all(currentUser) as any[]);expect(privateRows).toHaveLength(1);expect(privateRows[0].value_json).toContain("bitcoinbushbash@walletofsatoshi.com");
   } else if (starter.title === "Bush Bash Nostr") {
     await expect(frame.getByRole("status")).not.toHaveText("Ready.", { timeout: 25000 });
   } else if (starter.title === "Bitcoin spinner") {

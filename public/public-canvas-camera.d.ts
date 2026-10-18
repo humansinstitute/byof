@@ -1,0 +1,12 @@
+export type PublicCanvasObject={kind:string;x:number;y:number;width:number;height:number;endX?:number;endY?:number;curveX?:number;curveY?:number};
+export type Bounds={left:number;top:number;right:number;bottom:number;width?:number;height?:number};
+export type Viewport={width:number;height:number};
+export type Camera={x:number;y:number;scale:number};
+export const MIN_SCALE:number,MAX_SCALE:number;
+export function clampScale(value:number):number;
+export function objectBounds(object:PublicCanvasObject):Bounds;
+export function contentBounds(objects:PublicCanvasObject[]):Required<Bounds>;
+export function cameraForBounds(bounds:Bounds,viewport:Viewport,scale:number):Camera;
+export function initialCamera(objects:PublicCanvasObject[],viewport:Viewport):Camera;
+export function fitCamera(objects:PublicCanvasObject[],viewport:Viewport):Camera;
+export function screenBounds(object:PublicCanvasObject,camera:Camera):Bounds;

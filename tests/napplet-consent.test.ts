@@ -18,3 +18,17 @@ test('dataset permission keeps technical identifiers behind details', async () =
   expect(source).toContain("deny.textContent=kind==='dataset'?'Not now':'Deny'");
   expect(source).toContain("allow.textContent=kind==='dataset'?'Open'");
 });
+
+test('outgoing payments use trusted exact-context confirmation and hold a single lock through submission', async () => {
+  const source = await Bun.file('public/napplet-host.js').text();
+  expect(source).toContain("kind==='payment'?'Approve wallet payment?'");
+  expect(source).toContain("Wallet funds will leave your account.");
+  expect(source).toContain("Amount: ${event.amount} ${event.unit}");
+  expect(source).toContain("destination.textContent=event.destination");
+  expect(source).toContain("Confirm the exact app version, Canvas, account, destination and amount before approving.");
+  expect(source).toContain("if(paymentPending)throw error('BUSY'");
+  expect(source.indexOf("paymentPending=true")).toBeLessThan(source.indexOf("method:'paymentPreview'"));
+  expect(source.indexOf("await ask(b,'payment',preview,signal)")).toBeLessThan(source.indexOf("method:'pay',confirmationToken"));
+  expect(source).toContain("method:'cancelPaymentPreview'");
+  expect(source).not.toContain("METHODS=['cashu.paymentPreview'");
+});

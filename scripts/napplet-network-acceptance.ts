@@ -19,12 +19,13 @@ const server=Bun.serve({hostname:'127.0.0.1',port:0,tls:{key:Bun.file(keyPath),c
  return response;
 }});
 const browser=await chromium.launch({executablePath:process.env.FREEDOM_BROWSER||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
-const checks:string[]=[],corsOrigins:string[]=[],webSockets:string[]=[];let blockedActiveRequests=0;
+const checks:string[]=[],corsOrigins:string[]=[],webSockets:string[]=[],mediaRequests:{path:string;referer:string|null;cookie:string|null}[]=[];let blockedActiveRequests=0;
 const external=Bun.serve({hostname:'127.0.0.1',port:0,tls:{key:Bun.file(keyPath),cert:Bun.file(certPath)},fetch(request,server){
  const url=new URL(request.url);corsOrigins.push(request.headers.get('origin')||'');
  if(url.pathname==='/socket'&&server.upgrade(request))return;
  if(url.pathname==='/data')return Response.json({service:'controlled-cors',ok:true},{headers:{'access-control-allow-origin':'null'}});
  if(url.pathname==='/no-cors')return Response.json({unsafe:true});
+ if(url.pathname.startsWith('/media/')){mediaRequests.push({path:url.pathname,referer:request.headers.get('referer'),cookie:request.headers.get('cookie')});if(url.pathname.endsWith('/gallery.png'))return new Response(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64'),{headers:{'content-type':'image/png'}});return new Response('missing',{status:404});}
  if(url.pathname.startsWith('/assets/')){blockedActiveRequests++;return new Response('window.remoteAssetExecuted=true',{headers:{'content-type':'application/javascript'}});}
  return new Response('not found',{status:404});
 },websocket:{open(){webSockets.push('open')},message(socket,message){socket.send('echo:'+message)},close(){}}});
@@ -43,7 +44,7 @@ async function openCanvas(page:Page){
 }
 async function results(frame:Frame){await expect.poll(()=>frame.evaluate(()=>!!(window as any).networkResults),{timeout:10000}).toBe(true);return frame.evaluate(()=>(window as any).networkResults);}
 
-const fixture=validateGeneratedHtml(`<!doctype html><html><head><meta charset="utf-8"><title>Network boundary fixture</title></head><body><p id="status">Testing</p><script>
+const fixture=validateGeneratedHtml(`<!doctype html><html><head><meta charset="utf-8"><title>Network boundary fixture</title></head><body><p id="status">Testing</p><figure><span id="gallery-loading">Loading public image…</span><img id="gallery-image" src="${externalOrigin}/media/gallery.png" alt="Public Nostr gallery fixture" loading="lazy" decoding="async" referrerpolicy="no-referrer" onload="document.getElementById('gallery-loading').textContent='Image loaded'" onerror="document.getElementById('gallery-loading').textContent='Image unavailable'"><a href="${externalOrigin}/media/gallery.png" rel="noopener noreferrer">Open original</a></figure><figure><img id="missing-image" src="${externalOrigin}/media/missing.png" alt="Missing public image" referrerpolicy="no-referrer" onerror="document.getElementById('missing-fallback').hidden=false"><a id="missing-fallback" href="${externalOrigin}/media/missing.png" rel="noopener noreferrer" hidden>Image unavailable; open source</a></figure><script>
 (async()=>{const out={};
  try{const response=await fetch(${JSON.stringify(externalOrigin+'/data')});out.https=await response.json();}catch(error){out.https={error:String(error)}}
  try{await fetch(${JSON.stringify(externalOrigin+'/no-cors')});out.noCors='readable';}catch{out.noCors='denied'}
@@ -66,9 +67,10 @@ try{
  let runtimeFrame=await runtimeElement.elementHandle().then(handle=>handle!.contentFrame()) as Frame,runtimeResults=await results(runtimeFrame);
  expect(runtimeResults.https).toEqual({service:'controlled-cors',ok:true});expect(runtimeResults.noCors).toBe('denied');expect(runtimeResults.wss).toBe('echo:hello');
  expect(runtimeResults).toMatchObject({cookie:'denied',parentText:'denied',localStorage:'denied',hostRead:'denied',script:'blocked',module:'blocked'});
+ expect(await runtimeFrame.locator('#gallery-image').evaluate((image:HTMLImageElement)=>({complete:image.complete,width:image.naturalWidth,alt:image.alt,referrer:image.referrerPolicy}))).toEqual({complete:true,width:1,alt:'Public Nostr gallery fixture',referrer:'no-referrer'});await expect(runtimeFrame.locator('#gallery-loading')).toHaveText('Image loaded');await expect(runtimeFrame.locator('#missing-fallback')).toBeVisible();
  expect(await runtimeFrame.evaluate(async()=>{try{await fetch('/api/v1/logout',{method:'POST',credentials:'include'});return 'readable'}catch{return 'denied'}})).toBe('denied');
  const runtimeUrl=await runtimeElement.getAttribute('src'),runtimeResponse=await page.request.get(new URL(runtimeUrl!,server.url).href);expect(runtimeResponse.headers()['content-security-policy']).toBe(previewPolicy);
- checks.push('Served runtime: controlled HTTPS/CORS fetch and secure WebSocket succeed; non-CORS response, host APIs, remote script/import/frame execution and browser storage/parent access remain unavailable');
+ checks.push('Served runtime: controlled HTTPS/CORS fetch, secure WebSocket and a direct no-referrer HTTPS gallery image succeed; missing media exposes an accessible fallback while host APIs, remote script/import/frame execution and browser storage/parent access remain unavailable');
 
  await page.reload();await openCanvas(page);const cachedElement=page.locator(`iframe[data-project="${created.project.id}"]`).first();await expect(cachedElement).toHaveAttribute('data-runtime-ready','true');expect(await cachedElement.getAttribute('data-cache-hit')).toBe('true');runtimeFrame=await cachedElement.elementHandle().then(handle=>handle!.contentFrame()) as Frame;runtimeResults=await results(runtimeFrame);expect(runtimeResults.https.ok).toBe(true);expect(runtimeResults.wss).toBe('echo:hello');
  checks.push('Cached immutable payload: fresh authenticated runtime shell reuses the same CSP and direct HTTPS/WSS policy');
@@ -80,8 +82,9 @@ try{
  checks.push('Fresh direct preview: exact same CSP and external-service behavior as the cached/served revision path');
 
  const requestOrigins=corsOrigins.filter(Boolean);expect(requestOrigins.length).toBeGreaterThanOrEqual(6);expect(new Set(requestOrigins)).toEqual(new Set(['null']));expect(webSockets.length).toBeGreaterThanOrEqual(3);expect(blockedActiveRequests).toBe(0);
+ expect(mediaRequests.some(request=>request.path==='/media/gallery.png')).toBe(true);expect(mediaRequests.some(request=>request.path==='/media/missing.png')).toBe(true);expect(mediaRequests.every(request=>request.referer===null&&request.cookie===null)).toBe(true);
  expect(hostApiRequests.some(request=>request.path==='/api/v1/me')).toBe(true);expect(hostApiRequests.some(request=>request.path==='/api/v1/logout'&&request.status===403)).toBe(true);expect(await page.evaluate(async()=>(await fetch('/api/v1/me')).status)).toBe(200);
  checks.push('Opaque children send null Origin, cannot read authenticated Freedom Tools APIs or log out the parent, and CSP prevents remote active requests from reaching the network');
- await Bun.write(evidence+'/results.json',JSON.stringify({proof:'Real Chrome with isolated Freedom Tools backend and deterministic external HTTPS/WSS browser routes',checks,corsOrigins,webSockets,blockedActiveRequests,hostApiRequests,policy:previewPolicy},null,2));
+ await Bun.write(evidence+'/results.json',JSON.stringify({proof:'Real Chrome with isolated Freedom Tools backend and deterministic external HTTPS/WSS browser routes',checks,corsOrigins,webSockets,mediaRequests,blockedActiveRequests,hostApiRequests,policy:previewPolicy},null,2));
  console.log(JSON.stringify({checks,evidence}));await context.close();
 }finally{await browser.close();external.stop(true);server.stop(true);app.db.close();}

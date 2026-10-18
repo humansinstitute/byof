@@ -40,7 +40,7 @@ export async function prepareChatAttachment(workshop:Workshop,member:Member,conf
   const candidate={attachmentId:body.attachmentId,projectId:project.id,uploader:member.pubkey,filename:name,contentType,sizeBytes:bytes.length};
   const jobId=createStorageJob(workshop,'chat_attachment',binding.target,name,bytes,candidate,undefined,contentType);
   workshop.db.run('INSERT INTO chat_attachments VALUES(?,?,?,?,?,?,?,?,?,?,?)',[body.attachmentId,workshop.id,project.id,member.pubkey,jobId,null,name,contentType,bytes.length,hash,now()]);
-  await dispatchStorageJob(workshop,config,jobId);
+  try{await dispatchStorageJob(workshop,config,jobId);}catch{demand(false,503,'Image upload could not start. Check Canvas storage, then paste the image again.');}
   return view(workshop.db.query('SELECT * FROM chat_attachments WHERE id=?').get(body.attachmentId),'uploading');
 }
 
@@ -48,13 +48,13 @@ export async function chatAttachmentStatus(workshop:Workshop,member:Member,confi
   workshop.project(member,projectId,true);demand(config,503,'Private Tower storage is unavailable');
   const row=workshop.db.query('SELECT * FROM chat_attachments WHERE id=? AND workshop_id=? AND project_id=? AND uploader=?').get(attachmentId,workshop.id,projectId,member.pubkey) as any;
   demand(row,404,'Pasted image upload was not found');
-  const job=await pollStorageJob(workshop,config,row.storage_job_id);
+  let job;try{job=await pollStorageJob(workshop,config,row.storage_job_id);}catch{return view(row,'error','Image upload status is unavailable. Check Canvas storage, then remove this image and paste it again.');}
   if(job.status==='verified'){
     demand(uuid.test(job.objectId)&&job.contentType===row.content_type&&job.sizeBytes===row.size_bytes&&job.sha256===row.sha256,409,'Verified image receipt changed');
     workshop.db.run('UPDATE chat_attachments SET storage_object_id=? WHERE id=? AND storage_object_id IS NULL',[job.objectId,row.id]);
     const ready=workshop.db.query('SELECT * FROM chat_attachments WHERE id=?').get(row.id) as any;return view(ready,'ready');
   }
-  if(job.error)return view(row,'error','Tower could not store this image. Retry or remove it.');
+  if(job.error)return view(row,'error','Tower could not verify this image. Check Canvas storage, then remove it and paste it again.');
   return view(row,'uploading');
 }
 

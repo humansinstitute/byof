@@ -10,6 +10,7 @@ export type CashuWallet = {
 export type CashuDeposit = {
   quote: string;
   invoice: string;
+  qr: string;
   state: 'UNPAID' | 'PAID' | 'ISSUED' | 'EXPIRED';
   expiry: number | null;
 };
@@ -18,11 +19,22 @@ export type CashuStatus =
   | { connected: true; wallet: CashuWallet; deposit: CashuDeposit | null }
   | { connected: false; state: 'none' | 'creating' | 'uncertain' };
 
+export type CashuPayment = {
+  quote: string;
+  amount: number;
+  feeReserve: number;
+  state: 'UNPAID' | 'PENDING' | 'PAID';
+  paymentPreimage: string | null;
+  expiry: number;
+};
+
 export interface ManagedCashuCapability {
   status(): Promise<CashuStatus>;
   connect(): Promise<{ connected: true; wallet: CashuWallet }>;
   createDeposit(amount: number): Promise<CashuDeposit>;
   checkDeposit(quote: string): Promise<CashuDeposit>;
+  pay(payment: { bolt11Request: string; amount: number } | { lightningAddress: string; amount: number }): Promise<CashuPayment>;
+  checkPayment(quote: string): Promise<CashuPayment>;
   disconnect(): Promise<{ connected: false; forgotten: boolean; upstreamDeleted: false }>;
 }
 

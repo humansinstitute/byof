@@ -12,7 +12,7 @@ export function installBoard(workshop:Workshop) {
 export function activeNapplets(workshop:Workshop):any[] {
   // Revisions are immutable successful checkpoints; pending local builds never
   // advance current_revision. Do not return conversations, storage grants or drafts.
-  return (workshop.db.query(`SELECT p.id,p.title,p.owner authorPubkey,p.shared_revision,p.current_revision,p.created_at,r.number,r.source_hash FROM projects p LEFT JOIN revisions r ON r.id=p.current_revision WHERE p.workshop_id=? AND p.hidden=0 ORDER BY p.created_at,p.id`).all(workshop.id) as any[])
+  return (workshop.db.query(`SELECT p.id,p.title,p.owner authorPubkey,p.shared_revision,p.current_revision,p.created_at,r.number,r.source_hash FROM projects p LEFT JOIN revisions r ON r.id=p.current_revision WHERE p.workshop_id=? AND p.hidden=0 AND p.deleted_at IS NULL ORDER BY p.created_at,p.id`).all(workshop.id) as any[])
     .filter(p=>workshop.projectOwnerAccess(p.authorPubkey)?.state==='admitted').map(p=>({...p,appVersionUrl:workshop.versionLink(p.id,p.current_revision)}));
 }
 export function boardSnapshot(workshop:Workshop) {

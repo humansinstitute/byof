@@ -39,10 +39,28 @@ Self-contained HTML continues to work anonymously. Identity, durable storage,
 datasets, wallet and other service calls remain bound to the visitor, project,
 revision and Canvas through the existing capability routes.
 
+## Read-only spatial navigation
+
+The hosted page renders the saved board coordinates and dimensions as world
+geometry. It opens on one useful content area rather than shrinking the whole
+board into the viewport. Visitors can drag empty Canvas or group background to
+pan, use the view controls to zoom/reset/fit, and use touch panning and pinch
+zoom. Pan mode temporarily places an explicit navigation shield over Napplet
+frames so a visitor can traverse the Canvas without turning embedded app input
+into accidental movement; with Pan mode off, iframe controls and scrolling keep
+their normal behavior. The Napplet menu centers the selected saved object and
+does not move or rewrite it.
+
+Public navigation is camera state only. It exposes no selection, edit, add,
+move, resize, delete, save or other persisted board mutation. Geometry is
+applied by the trusted renderer without weakening the page's strict style CSP.
+
 ## Deployment verification
 
-Build metadata includes `public-canvas.js` and `public-canvas.css`. A release must
+Build metadata includes `public-canvas.js`, `public-canvas-camera.js` and
+`public-canvas.css`. A release must
 verify their hashes from `/health`, check anonymous desktop/mobile `/p/<name>`,
-exercise an included and excluded Napplet, and confirm an anonymous bridge denial
+exercise pan, zoom, reset, fit and menu focus on a deliberately spread-out board,
+use an included Napplet without moving it, and confirm an anonymous bridge denial
 plus a signed-in consent path. Activation must use the registered Freedom Tools
 managed app/deployment path and preserve the persistent data volume.

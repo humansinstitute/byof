@@ -83,7 +83,7 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport?:(s
         demand(config.origin&&!url.search&&config.followup,503,'Builder preparation is not configured');
         const raw=await request.text();demand(Buffer.byteLength(raw)<=limits.callbackBytes,413,'Builder preparation too large');
         let body:any;try{body=JSON.parse(raw)}catch{throw new HttpError(400,'Invalid builder preparation')}
-        const project=db.query('SELECT workshop_id FROM projects WHERE id=?').get(body?.projectId) as any;demand(project,404,'Builder project missing');
+        const project=db.query('SELECT workshop_id FROM projects WHERE id=? AND deleted_at IS NULL').get(body?.projectId) as any;demand(project,404,'Builder project missing');
         workshop=new Workshop(db,workshop.assets,project.workshop_id);
         const storage=site.storage(workshop.id);demand(storage,503,'Managed builder authority unavailable');
         const eventId=verifyStorageAuth(request,raw,storage.appPubkey,config.origin);
@@ -98,7 +98,7 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport?:(s
       if (['/api/v1/internal/publication/candidate','/api/v1/internal/publication/intent','/api/v1/internal/publication/failure','/api/v1/publication/version'].includes(path) && method==='POST') {
         demand(config.origin&&!url.search,401,'Publication URL binding denied');
         const raw=await request.text();demand(Buffer.byteLength(raw)<=limits.callbackBytes,413,'Publication receipt too large');
-        const body=JSON.parse(raw),project=db.query('SELECT workshop_id FROM projects WHERE id=?').get(body.projectId) as any;
+        const body=JSON.parse(raw),project=db.query('SELECT workshop_id FROM projects WHERE id=? AND deleted_at IS NULL').get(body.projectId) as any;
         demand(project,404,'Publication project missing');workshop=new Workshop(db,workshop.assets,project.workshop_id);
         const storage=site.storage(workshop.id);demand(storage,503,'Managed publication storage unavailable');
         const eventId=verifyStorageAuth(request,raw,storage.appPubkey,config.origin!);
@@ -159,7 +159,7 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport?:(s
       const publicApp=path.match(/^\/p\/([a-z0-9]+(?:-[a-z0-9]+)*)\/apps\/([a-f0-9-]{36})$/);
       if(publicApp&&method==='GET'){
         const found=HostedPublication.lookup(db,publicApp[1]!);demand(found,404,'Published Napplet not found');const app=found.snapshot.napplets.find(p=>p.projectId===publicApp[2]);demand(app,404,'Published Napplet not found');
-        const project=db.query('SELECT hidden,owner FROM projects WHERE id=? AND workshop_id=?').get(app.projectId,found.snapshot.workshopId) as any;
+        const project=db.query('SELECT hidden,owner FROM projects WHERE id=? AND workshop_id=? AND deleted_at IS NULL').get(app.projectId,found.snapshot.workshopId) as any;
         const excluded=db.query('SELECT excluded FROM hosted_publication_exclusions WHERE workshop_id=? AND project_id=?').get(found.snapshot.workshopId,app.projectId) as any;
         const publicWorkshop=new Workshop(db,workshop.assets,found.snapshot.workshopId);demand(project&&!project.hidden&&!excluded?.excluded&&publicWorkshop.projectOwnerAccess(project.owner)?.state==='admitted',404,'Published Napplet not found');
         const storage=site.storage(found.snapshot.workshopId),source=storage?await remotePreview(publicWorkshop,storage,app.revisionId).catch(()=>null):null;
@@ -180,7 +180,7 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport?:(s
       // Alternate managed port/mesh entry pages move here before authentication.
       if (path === "/api/v1/browser-origin" && method === "GET") return json({ origin });
       if (["/health","/api/health"].includes(path) && method === "GET") {const capable=workshopBuilders(config.followup);const publicationAvailable=!!capable?.agentPublication&&!!(config.storage||config.managedStorage||config.storageTemplates?.length||config.workshopStorage?.length);return json({ status: "ok", service: "liquid-freedom", version: config.version, build: await Bun.file(join(import.meta.dir, "../tmp/build/assets.json")).json().catch(() => null), hostConfigured: !!config.hostPubkey, generation: { available: !!capable?.memberWorkshops && !capable.suspended, operatorApprovedBuildAvailable: !!config.operatorBuild, ownerProjectFollowupAvailable: !!config.followup && !config.followup.suspended, ownerProjectFollowupSuspended: !!config.followup?.suspended, reason: "Installed workshop builders require active admission, project ownership and available allowance" }, publication: { available: publicationAvailable, reason: publicationAvailable?"Agent-tool publication is installed; each Canvas still requires its verified private storage binding.":"Awaiting installed agent-tool publication and managed storage authority" }, limits });}
-      if (["/", "/app.js", "/activity-time.js", "/chat-attachments.js", "/invitation-url.js", "/napplet-host.js", "/napplet-cache.js", "/canvas-host.js", "/identity.js", "/napplet.d.ts", "/style.css", "/public-canvas.js", "/public-canvas.css"].includes(path) && method === "GET") {
+      if (["/", "/app.js", "/activity-time.js", "/chat-attachments.js", "/invitation-url.js", "/napplet-host.js", "/napplet-cache.js", "/canvas-host.js", "/identity.js", "/napplet.d.ts", "/style.css", "/public-canvas.js", "/public-canvas-camera.js", "/public-canvas.css"].includes(path) && method === "GET") {
         const file = Bun.file(join(import.meta.dir, "../public", path === "/" ? "index.html" : path.slice(1)));
         demand(await file.exists(), 503, "Managed build required");
         return new Response(file, { headers: { ...security, "cache-control": "no-store", "content-type": path.endsWith(".js") ? "application/javascript" : path.endsWith(".css") ? "text/css" : path.endsWith(".d.ts") ? "text/plain; charset=utf-8" : "text/html", "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https: wss://relay.primal.net wss://nos.lol wss://relay.damus.io wss://purplepag.es; frame-src 'self'; img-src 'self' https: data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'" } });
@@ -290,6 +290,7 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport?:(s
       const project = path.match(/^\/api\/v1\/projects\/([^/]+)(?:\/(activate|restore|share|consent|requests|preview|payload|runtime|rename|edit))?$/);
       if (project) {
         const [, id, action] = project;
+        if (!action && method === 'DELETE') return json(workshop.deleteNapplet(member,id!,body));
         if (!action && method === "GET") return json({ ...workshop.detail(member, id!), execution: executionLinks(workshop,member,id!,config.followup), nativeDeletionAvailable: !!config.followup?.nativeDeletion && !config.followup.suspended && followupAvailable(workshop.project(member,id!),config.followup), generationAvailable: followupAvailable(workshop.project(member,id!),config.followup)&&runtimeAvailable(config.followup,loadBuilderEngine(db,workshop.id).runtime), storageReady:workshop.storageReady, generationReason: !runtimeAvailable(config.followup,loadBuilderEngine(db,workshop.id).runtime)?'The selected builder engine awaits platform activation; your request and app remain saved.':!workshop.storageReady ? 'Private storage needs authorization. Questions are available; app changes wait for the site administrator to connect storage.' : config.followup?.suspended && id === config.followup.projectId ? "This project conversation is awaiting native resume activation. Requests are saved without execution." : null });
         if (action === "edit" && method === "GET") {
           workshop.editableProject(member,id!);

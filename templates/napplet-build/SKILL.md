@@ -36,16 +36,23 @@ stylesheets, frames, plugins/objects or form destinations. It receives the
 host-mediated `window.napplet` version 1 API: capability
 discovery, consented public identity, participant event signing and durable user
 storage and approved public read-only relay queries/live subscriptions. Use the exact methods and limits in the current saved guidance. This is
-a Freedom Tools subset, not full NAP conformance. No host administration, relay publishing/AUTH, external publication, private keys or LLM backend APIs are available. Callbacks belong in napplet.relay.subscribe(options,{onEvent,onStatus}); close its returned handle on teardown. Query returns events plus honest per-relay completeness/partial/truncated states. Failures are not empty feeds. Render relay data as text, never HTML; do not load URLs from tags or content. Builder-side public retrieval
+a Freedom Tools subset, not full NAP conformance. No host administration, relay publishing/AUTH, external publication, private keys or LLM backend APIs are available. Callbacks belong in napplet.relay.subscribe(options,{onEvent,onStatus}); close its returned handle on teardown. Query returns events plus honest per-relay completeness/partial/truncated states. Failures are not empty feeds. Render relay text and metadata with textContent, never HTML. An intentional public-media gallery may extract image candidates, but must parse and accept only https: URLs without credentials, reject loopback/link-local/private-network hosts, use descriptive alt text, lazy loading, no-referrer and visible loading/error/fallback links, and acknowledge that the remote host learns the viewer's IP and browser metadata. Never treat arbitrary note markup as DOM. Builder-side public retrieval
 is distinct from page runtime permissions.
 
 The one server-mediated external service is the fixed managed Cashu/Ippon
 domain: `napplet.cashu.status()`, `connect()`, `createDeposit(amount)`,
-`checkDeposit(quote)` and `disconnect()`. The host chooses the Ippon endpoint,
-retains its access key and scopes wallet/quote records to the authenticated
-Canvas, project and user. App code cannot supply an upstream URL, path, method,
-header, key or identity. Results contain only safe wallet/balance and deposit
-invoice/status data. Creating an invoice is pending, `PAID` still awaits
+`checkDeposit(quote)`, `pay({bolt11Request,amount})` or
+`pay({lightningAddress,amount})`, `checkPayment(quote)` and `disconnect()`.
+Every outgoing payment opens a trusted host-owned confirmation showing the
+exact app/version, Canvas, signed-in account, destination, amount/unit and that
+wallet funds will leave. The app should show its own review first. Denial,
+timeout, stale context and concurrent confirmation fail before submission; do
+not silently retry an uncertain submission. Only `PAID` is final; `UNPAID` and
+`PENDING` remain incomplete. The host chooses the Ippon endpoint, retains its
+access key and scopes wallet/quote records to the authenticated Canvas, project
+and user. App code cannot supply an upstream URL, path, method, header, key or
+identity. Results contain only safe wallet/balance, deposit invoice/status and
+payment quote/status data. Creating an invoice is pending, `PAID` still awaits
 minting, and only `ISSUED` means ecash was issued. Do not read or migrate an old
 browser-stored Ippon key. Disconnect forgets local managed authority; Ippon has
 no upstream wallet-delete operation. No other generic proxy exists.
@@ -92,8 +99,8 @@ The pipeline independently delivers that final message. For questions, planning
 and discussion, give an ordinary answer without calling publication; no version
 is created. Never claim a successful build is published if the tool failed.
 
-Normal HTTPS source citation links in anchors are allowed. External scripts,
-stylesheets, images, frames and imports remain outside the runtime boundary;
+Normal HTTPS source citation links in anchors and validated HTTPS images are allowed. External scripts,
+stylesheets, frames, imports and other remotely executable content remain outside the runtime boundary;
 direct HTTPS/WSS service calls are allowed under the browser rules above. Public Nostr/Blossom publishing is separate from this private app
 version delivery and still requires its own consent and integration.
 

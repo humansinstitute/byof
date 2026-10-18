@@ -1,8 +1,18 @@
 import { sha256 } from './assets.ts';
+import { limits } from './config.ts';
 export const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 export type StorageTarget={towerUrl:string;workspaceId:string;workspaceOwnerNpub:string;appNpub:string};
 export type StorageTransport=(url:string,method:string,body?:unknown)=>Promise<Response>;
 export type StoredArtifact={objectId:string;workspaceId:string;towerUrl:string;contentUrl:string;sha256:string;sizeBytes:number;isPublic:false};
+const attachmentContentTypes=new Set(['image/png','image/jpeg','image/webp','image/gif']);
+export function storedContentLimit(contentType:string){return attachmentContentTypes.has(contentType)?limits.attachmentBytes:contentType==='text/html'?limits.sourceBytes:0;}
+async function boundedBytes(response:Response,limit:number){
+  const reader=response.body?.getReader();if(!reader)return new Uint8Array();
+  const chunks:Uint8Array[]=[];let total=0;
+  try{while(true){const next=await reader.read();if(next.done)break;total+=next.value.byteLength;if(total>limit)throw Error('storage_read_size_denied');chunks.push(next.value);}}
+  catch(error){await reader.cancel().catch(()=>{});throw error;}
+  const bytes=new Uint8Array(total);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}return bytes;
+}
 export function storageTarget(value:any):StorageTarget {
   const url=new URL(value.towerUrl);
   if(url.protocol!=='https:' || url.origin!==value.towerUrl || !uuid.test(value.workspaceId) || !/^npub1[0-9a-z]{58}$/.test(value.workspaceOwnerNpub) || !/^npub1[0-9a-z]{58}$/.test(value.appNpub))throw Error('storage_target_invalid');
@@ -26,10 +36,12 @@ export class TowerStorageClient {
   async readAndVerify(objectId:string,fileName:string,hash:string,size:number,contentType='text/html'){
     const metadata=await this.metadata(objectId);this.assertMetadata(metadata,objectId,fileName,contentType);
     if(!metadata.completed_at||metadata.sha256_hex!==hash||Number(metadata.size_bytes)!==size)throw Error('storage_metadata_hash_mismatch');
+    const limit=storedContentLimit(contentType);if(!limit||!Number.isSafeInteger(size)||size<1||size>limit)throw Error('storage_read_size_denied');
     const response=await this.request(this.url('/api/v4/storage/'+objectId+'/content'),'GET');
     if(!response.ok)throw Error('tower_storage_read_http_'+response.status);
-    if(Number(response.headers.get('content-length'))>256000)throw Error('storage_read_size_denied');
-    const bytes=new Uint8Array(await response.arrayBuffer());
+    const declared=response.headers.get('content-length');
+    if(declared!==null&&(!/^\d+$/.test(declared)||Number(declared)!==size))throw Error('storage_read_length_mismatch');
+    const bytes=await boundedBytes(response,Math.min(limit,size));
     if(bytes.length!==size||sha256(bytes)!==hash)throw Error('storage_readback_mismatch');
     return bytes;
   }

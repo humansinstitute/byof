@@ -6,6 +6,22 @@ HTML outside Freedom Tools does not provide this API. This bridge adds public
 participant identity, participant signing, durable app data, approved public relay reads and a narrow managed Cashu/Ippon wallet to existing
 preview/sharing behavior.
 
+## Public image privacy boundary
+
+Napplet previews may render intentional `https:` images, including public Nostr
+and Blossom media. The preview still has an opaque/null origin and the parent
+iframe uses `referrerpolicy="no-referrer"`; no Freedom Tools cookie, CSRF token,
+signer, wallet credential or storage authority is exposed to the child or added
+to image requests. Freedom Tools does not provide a generic image proxy.
+
+The direct request necessarily reveals the viewer's IP address and ordinary
+browser/network metadata to the image host. A gallery should therefore validate
+parsed URLs, reject embedded credentials and local/private-network destinations,
+use `referrerpolicy="no-referrer"`, descriptive alt text, lazy loading and a
+visible loading/error/fallback link. Untrusted note text remains text, never
+HTML. CSP continues to forbid remote scripts, imports, stylesheets, frames,
+objects, form destinations and other active remote content.
+
 ```js
 const caps = await napplet.capabilities(); // No identity disclosed
 const pubkey = await napplet.identity.getPublicKey(); // Host consent
@@ -40,6 +56,8 @@ a fake bridge, add a signer/key, or fetch host endpoints from the iframe.
 | `cashu.connect()` | none | idempotently returns the existing managed wallet or explicitly creates one |
 | `cashu.createDeposit(amount)` | integer 1–100000 in the wallet unit | bounded Lightning invoice/quote/state/expiry |
 | `cashu.checkDeposit(quote)` | a quote previously created in this exact scope | refreshed invoice/quote/state/expiry |
+| `cashu.pay({bolt11Request,amount})` or `cashu.pay({lightningAddress,amount})` | exactly one validated destination and an integer 1–100000 | trusted confirmation, then bounded payment quote/amount/fee/state/preimage/expiry |
+| `cashu.checkPayment(quote)` | a payment quote previously created in this exact scope | refreshed payment state with the same safe fields |
 | `cashu.disconnect()` | none | forgets local managed credential and quote records; reports that upstream deletion is unavailable |
 
 The public declaration is served as [`/napplet.d.ts`](../public/napplet.d.ts).
@@ -64,12 +82,25 @@ again. Ippon has no delete-wallet endpoint, so forgetting removes local
 authority and quote metadata but may leave an empty alpha wallet upstream.
 
 `status` and `connect` return `name`, `mint`, `unit`, confirmed/pending balances
-and safe limits. Deposits return only `quote`, BOLT11 `invoice`, `state` and
-nullable `expiry`. Ippon's `access_key` is deliberately removed even though its
+and safe limits. Deposits return only `quote`, BOLT11 `invoice`, a host-generated
+scannable `qr` data URL, `state` and nullable `expiry`. Ippon's `access_key` is deliberately removed even though its
 wallet response echoes it. Response parsing allowlists these fields; extra JSON
 cannot cross the bridge. Existing `napplet.storage` and existing projects are
 untouched. In particular, an access key previously stored by an older Cashu
 starter is not read or migrated automatically.
+
+Outgoing pay accepts exactly one normalized BOLT11 invoice or Lightning address
+and a whole amount from 1 through 100000. Before mutation, the trusted parent
+gets a short-lived single-use preview from the backend and displays a modal with
+the exact app title/version, Canvas, account key, destination, amount/unit and an
+explicit warning that funds leave the wallet. Denial, timeout, navigation,
+account/frame changes, preview mismatch and concurrent confirmations fail closed.
+Only the trusted parent receives the preview token. It is scope-bound, expires
+after 55 seconds and is consumed before the fixed upstream POST, so generated
+code cannot invoke an unconfirmed drain primitive or replay approval. Payment
+responses expose only `quote`, `amount`, `feeReserve`, `state`, nullable
+`paymentPreimage` and `expiry`; only `UNPAID`, `PENDING` and `PAID` are accepted.
+Known quotes are stored under the exact wallet scope before status reads.
 
 The host accepts deposit amounts only as whole values from 1 through 100000 and
 uses the connected wallet's server-recorded unit. It accepts only bounded quote

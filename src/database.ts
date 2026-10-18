@@ -64,6 +64,8 @@ export function openDatabase(directory: string): Database {
   db.run('INSERT OR IGNORE INTO workshop_identity VALUES(1,?)',[crypto.randomUUID()]);
   const projectColumns=db.query('PRAGMA table_info(projects)').all() as {name:string}[];
   if(!projectColumns.some(c=>c.name==='workshop_id'))db.exec('ALTER TABLE projects ADD COLUMN workshop_id TEXT');
+  if(!projectColumns.some(c=>c.name==='deleted_at'))db.exec('ALTER TABLE projects ADD COLUMN deleted_at INTEGER');
+  if(!projectColumns.some(c=>c.name==='deleted_by'))db.exec('ALTER TABLE projects ADD COLUMN deleted_by TEXT REFERENCES members(pubkey)');
   db.exec('UPDATE projects SET workshop_id=(SELECT workshop_id FROM workshop_identity WHERE id=1) WHERE workshop_id IS NULL');
   db.exec(`CREATE TABLE IF NOT EXISTS project_forks(
       workshop_id TEXT NOT NULL,

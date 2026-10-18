@@ -18,13 +18,16 @@ test("catalogue contains exactly Pete's five starters and removes legacy entries
   }
 });
 
-test("Cashu uses only the narrow managed Ippon capability and explains issuance honestly", () => {
+test("Cashu starter is a provider-neutral forkable arcade wallet with receive, send and private address book", () => {
   const source = byId("cashu").source;
-  for (const method of ["napplet.cashu.status()", "napplet.cashu.connect()", "napplet.cashu.createDeposit(amount)", "napplet.cashu.checkDeposit(currentDeposit.quote)", "napplet.cashu.disconnect()"]) expect(source).toContain(method);
+  for (const method of ["napplet.cashu.status()", "napplet.cashu.connect()", "napplet.cashu.createDeposit(amount)", "napplet.cashu.checkDeposit(currentDeposit.quote)", "napplet.cashu.pay(", "napplet.cashu.checkPayment(currentPayment.quote)", "napplet.cashu.disconnect()", 'napplet.storage.get("wallet.addressBook.v1")', 'napplet.storage.set("wallet.addressBook.v1",contacts)']) expect(source).toContain(method);
   expect(source).toContain('state==="ISSUED"');
-  expect(source).toContain("Creating it did not receive funds");
-  expect(source).toContain("not a shared Canvas dataset");
-  expect(source).not.toMatch(/fetch\(|accessKey|authorization|ippon\.wallet\.v1|napplet\.storage|Ippon server<input/i);
+  expect(source).toContain('id="invoiceQr"'); expect(source).toContain('src=data.qr'); expect(source).toContain('href="lightning:"+data.invoice');
+  expect(source).toContain("bitcoinbushbash@walletofsatoshi.com"); expect(source).toContain("PAYMENT DENIED · NO FUNDS SENT");
+  expect(source).toContain("REVIEW EVERY DETAIL"); expect(source).toContain("CONTINUE TO APPROVAL");
+  expect(source).not.toMatch(/fetch\(|accessKey|authorization|ippon\.wallet\.v1/i);
+  expect(source).not.toMatch(/Ippon|Minibits|Freedom Tools|access[- ]?key|bridge|capabilit|dataset|website|\bhost\b/i);
+  expect(byId("cashu").description).not.toMatch(/Ippon|Minibits|Freedom Tools|provider|\bhost\b|bridge|capabilit|dataset/i);
 });
 
 test("Nostr browser uses the trusted relay API, exact filter, bounded rendering and honest states", () => {

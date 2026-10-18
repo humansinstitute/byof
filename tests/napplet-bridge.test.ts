@@ -3,9 +3,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { application } from '../src/application.ts';
 import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools';
-import { installBuilderPrompt, loadBuilderPrompt, obsoleteCapabilityParagraph, nappletCapabilityParagraph, migrateNappletPrompt, requestBuilderPrompt } from '../src/builder-prompt.ts';
+import { installBuilderPrompt, loadBuilderPrompt, obsoleteCapabilityParagraph, nappletCapabilityParagraph, migrateNappletPrompt, requestBuilderPrompt, nappletExecutionContract } from '../src/builder-prompt.ts';
 import { validateGeneratedHtml } from '../src/pipeline/artifact.ts';
 import { injectNappletBridge } from '../src/napplet-runtime.ts';
+import { previewPolicy } from '../src/assets.ts';
 
 test('authenticated durable app data isolates session, participant, project and workshop with quota and revocation',async()=>{
  const directory=mkdtempSync(tmpdir()+'/napplet-data-'),secret=generateSecretKey();
@@ -74,7 +75,9 @@ test('prompt migration replaces only the literal obsolete paragraph and preserve
 });
 
 test('validator permits inline APIs and direct service calls while active embedding stays forbidden; injection precedes scripts in standards mode',()=>{
- const html='<!doctype html><html><head><script>fetch("https://api.example/data");new WebSocket("wss://socket.example");napplet.storage.set("key",{ok:true})</script></head><body></body></html>';
+ const html='<!doctype html><html><head><script>fetch("https://api.example/data");new WebSocket("wss://socket.example");napplet.storage.set("key",{ok:true})</script></head><body><img src="https://media.example/photo.png" alt="Public event" loading="lazy" referrerpolicy="no-referrer"></body></html>';
  expect(validateGeneratedHtml(html)).toBe(html);const served=injectNappletBridge(html,'test-document');expect(served.startsWith('<!doctype html><meta http-equiv="Content-Security-Policy"')).toBe(true);expect(injectNappletBridge('<!-- Intro -->'+html,'test-document').startsWith('<!-- Intro --><!doctype html><meta http-equiv="Content-Security-Policy"')).toBe(true);expect(served.indexOf("Object.defineProperty(window,'napplet'")).toBeLessThan(served.indexOf('napplet.storage.set'));
- for(const source of ['<html><iframe></iframe></html>','<html><script src="https://evil.test/x.js"></script></html>','<html><script src="/host.js"></script></html>','<html><link rel="stylesheet" href="/host.css"></html>','<html><form action="https://evil.test/"></form></html>'])expect(()=>validateGeneratedHtml(source)).toThrow();
+ expect(previewPolicy).toContain('img-src https: data: blob:');expect(previewPolicy).toContain("default-src 'none'");expect(previewPolicy).toContain("frame-src 'none'");expect(previewPolicy).toContain("object-src 'none'");expect(previewPolicy).toContain("form-action 'none'");
+ expect(nappletExecutionContract).toContain('Intentional public-media galleries may load HTTPS images directly');expect(nappletExecutionContract).toContain('textContent, never HTML');expect(nappletExecutionContract).toContain('referrerpolicy="no-referrer"');expect(nappletExecutionContract).toContain("viewer's IP address");
+ for(const source of ['<html><iframe></iframe></html>','<html><script src="https://evil.test/x.js"></script></html>','<html><script src="/host.js"></script></html>','<html><link rel="stylesheet" href="/host.css"></html>','<html><form action="https://evil.test/"></form></html>','<html><img src="http://media.example/x.png"></html>','<html><img srcset="https://media.example/x.png 1x"></html>'])expect(()=>validateGeneratedHtml(source)).toThrow();
 });

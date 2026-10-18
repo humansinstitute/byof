@@ -34,3 +34,21 @@ test('Napplet edit affordances distinguish administrators from ordinary nonowner
   expect(source).toContain("own ? 'Your project' : 'Administrator editing'");
   expect(source).toContain('Administrative changes are recorded under your account. Public publication consent remains with the Napplet owner.');
 });
+
+test('site-admin Napplet deletion is deliberately confirmed and only refreshes after server success',()=>{
+  const actions=source.match(/if \(action === 'napplet-settings' \|\| action === 'napplet-options'\) \{[\s\S]*?\n    \}/)?.[0]||'';
+  expect(actions).toContain("me.admin?button('confirm-napplet-delete','Delete Napplet'");
+  expect(actions).not.toContain("owner?button('confirm-napplet-delete'");
+  const confirmation=source.match(/if\(action==='confirm-napplet-delete'\)\{[\s\S]*?\n    \}/)?.[0]||'';
+  expect(confirmation).toContain("if(!me.admin)throw Error('Site administrator access required')");
+  expect(confirmation).toContain('data-title="${esc(p.title)}"');
+  expect(confirmation).toContain('data-revision="${esc(p.current_revision)}"');
+  expect(confirmation).toContain('External publication artifacts and native transcripts are not erased.');
+  expect(confirmation).toContain('data-a="close">Cancel');
+  const submission=source.match(/if\(event.target.id==='napplet-delete-form'\)\{[\s\S]*?\n    \}/)?.[0]||'';
+  expect(submission).toContain("await api(`projects/${id}`");
+  expect(submission.indexOf('await api')).toBeLessThan(submission.indexOf("$('#dialog').close()"));
+  expect(submission.indexOf('await api')).toBeLessThan(submission.indexOf('await page()'));
+  expect(source).toContain("event.target.id==='napplet-delete-form'?$('#napplet-delete-error')");
+  expect(source).toContain("submit.disabled=event.target.value!==form.dataset.title");
+});
