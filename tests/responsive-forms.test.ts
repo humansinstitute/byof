@@ -14,7 +14,7 @@ test('invitation dialog keeps the Canvas Code between QR and selectable URL',()=
  expect(invite).toContain('class="field-action"');
  expect(invite).toContain('role="status" aria-live="polite"');
  expect(invite).toContain('does not expire automatically');
- expect(invite).toContain('Stop admitting');
+ expect(invite).toContain('Stop inviting');
  expect(invite).toContain('People already admitted keep access');
  expect(invite).not.toContain('24 hours');
 });
