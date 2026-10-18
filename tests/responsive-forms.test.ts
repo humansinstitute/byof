@@ -13,6 +13,8 @@ test('invitation dialog keeps the Canvas Code between QR and selectable URL',()=
  expect(invite).toContain('readonly');
  expect(invite).toContain('class="field-action"');
  expect(invite).toContain('role="status" aria-live="polite"');
+ expect(invite).toContain('This code does not expire. It can admit up to 10 people.');
+ expect(invite).not.toContain('24 hours');
 });
 test('copy feedback covers success and manual-copy recovery',()=>{
  const copy=app.match(/if\(action==='copy-invite-url'\)\{[\s\S]*?\n    \}/)![0];

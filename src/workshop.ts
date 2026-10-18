@@ -45,7 +45,7 @@ export class Workshop {
       const previous=this.membership(member.pubkey);demand(previous?.state!=='banned',403,'Access removed for this workshop');
       if(previous?.state==='admitted')return this.scoped(member);
       const room=this.roomRow();let admitted=member.host||room.admission==='open';
-      if(body.invitation){const used=this.db.run('UPDATE invitations SET remaining=remaining-1 WHERE hash=? AND workshop_id=? AND remaining>0 AND expires_at>=?',[sha256(text(body.invitation,'Invitation',200)),this.id,now()]);demand(used.changes===1,403,'Invitation is invalid, expired or exhausted');admitted=true;}
+      if(body.invitation){const used=this.db.run('UPDATE invitations SET remaining=remaining-1 WHERE hash=? AND workshop_id=? AND remaining>0',[sha256(text(body.invitation,'Invitation',200)),this.id]);demand(used.changes===1,403,'Invitation is invalid or exhausted');admitted=true;}
       if(previous){if(admitted){if(this.legacy)this.db.run("UPDATE members SET state='admitted' WHERE pubkey=?",[member.pubkey]);else this.db.run("UPDATE workshop_members SET state='admitted' WHERE workshop_id=? AND pubkey=?",[this.id,member.pubkey]);}}
       else {demand(!this.legacy,409,'Legacy membership is created at sign-in');demand((this.db.query('SELECT count(*) n FROM workshop_members WHERE workshop_id=?').get(this.id) as any).n<limits.participants,409,'Workshop capacity reached');this.db.run('INSERT INTO workshop_members VALUES(?,?,?,?,?)',[this.id,member.pubkey,admitted?'admitted':'pending',20,now()]);}
       return this.scoped(member);
@@ -273,12 +273,11 @@ export class Workshop {
   invitation(member: Member, body: any) {
     this.host(member);demand(Number.isInteger(body.uses)&&body.uses>0&&body.uses<=50,400,'Invitation uses must be 1–50');
     demand(body.shortCode===undefined||typeof body.shortCode==='boolean',400,'Invalid invitation type');
-    const expiresAt=now()+86400;
     return this.db.transaction(()=>{
-      demand((this.db.query('SELECT count(*) n FROM invitations WHERE workshop_id=? AND remaining>0 AND expires_at>=?').get(this.id,now()) as any).n<100,429,'Workshop invitation capacity reached');
+      demand((this.db.query('SELECT count(*) n FROM invitations WHERE workshop_id=? AND remaining>0').get(this.id) as any).n<100,429,'Workshop invitation capacity reached');
       const token=body.shortCode?newJoinCode(this.db):`${crypto.randomUUID()}${crypto.randomUUID()}`;
-      this.db.run('INSERT INTO invitations(hash,remaining,expires_at,workshop_id) VALUES(?,?,?,?)',[sha256(token),body.uses,expiresAt,this.id]);
-      return {token,...(body.shortCode?{code:token}:{}),expiresAt,uses:body.uses};
+      this.db.run('INSERT INTO invitations(hash,remaining,expires_at,workshop_id) VALUES(?,?,0,?)',[sha256(token),body.uses,this.id]);
+      return {token,...(body.shortCode?{code:token}:{}),uses:body.uses};
     }).immediate();
   }
   previewRevision(member: Member, id: string, revisionId: string) {

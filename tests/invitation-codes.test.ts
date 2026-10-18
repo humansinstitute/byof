@@ -9,7 +9,7 @@ type Account={cookie:string;csrf:string;member:any};
 async function call(path:string,a?:Account,body?:any,scope?:string){const r=await app.handle(new Request(origin+'/api/v1/'+path,{method:body===undefined?'GET':'POST',headers:{origin,'content-type':'application/json',...(a?{cookie:a.cookie,'x-csrf-token':a.csrf}:{}),...(scope?{'x-workshop-id':scope}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})}));return{status:r.status,data:await r.json(),cookie:r.headers.get('set-cookie')?.split(';')[0]};}
 async function login(secret=generateSecretKey(),invitation?:any){const challenge=(await call('challenge',undefined,{})).data;const r=await call('login',undefined,{challengeId:challenge.id,event:finalizeEvent(challenge.event,secret),identityType:'extension',name:'Code participant',...(invitation===undefined?{}:{invitation})});return{...r,cookie:r.cookie!,csrf:r.data.csrf,member:r.data.member};}
 async function workshop(host:Account){return(await call('site/workshops',host,{title:'Private code room',introduction:'Private',owner:host.member.pubkey})).data.id as string;}
-async function invite(host:Account,scope?:string,uses=1){const r=await call('host/invitations',host,{uses,shortCode:true},scope);expect(r.status).toBe(200);expect(r.data.code).toMatch(/^\d{6}$/);expect(r.data.url).toBe(origin+'/?code='+r.data.code);expect(r.data.qr).toStartWith('data:image/gif;base64,');return r.data;}
+async function invite(host:Account,scope?:string,uses=1){const r=await call('host/invitations',host,{uses,shortCode:true},scope);expect(r.status).toBe(200);expect(r.data.code).toMatch(/^\d{6}$/);expect(r.data.url).toBe(origin+'/?code='+r.data.code);expect(r.data.qr).toStartWith('data:image/gif;base64,');expect(r.data.expiresAt).toBeUndefined();expect((app.db.query('SELECT expires_at FROM invitations WHERE hash=?').get(sha256(r.data.code)) as any).expires_at).toBe(0);return r.data;}
 beforeEach(()=>{dir=mkdtempSync('/tmp/freedom-codes-');key=generateSecretKey();app=application({origin,hostPubkey:getPublicKey(key),dataDir:dir,version:'codes'});});
 afterEach(()=>{app.db.close();rmSync(dir,{recursive:true,force:true});});
 test('workshop-bound short invites atomically redeem, select target and admit existing pending members',async()=>{
@@ -23,13 +23,15 @@ test('workshop-bound short invites atomically redeem, select target and admit ex
  const rows=app.db.query('SELECT * FROM invitations').all();expect(JSON.stringify(rows)).not.toContain(code.code);expect((rows[0] as any).remaining).toBe(0);
  const legacy=await invite(host);const pending=await login();expect(pending.member.state).toBe('pending');expect((await call('workshops/redeem-code',pending,{code:legacy.code})).data.member.state).toBe('admitted');
 });
-test('expiry, exhaustion, bans, host/CSRF gates and malformed code bodies cannot confer access',async()=>{
- const host=await login(key),a=await login(),scope=await workshop(host),code=await invite(host,scope);
+test('legacy expiry values are ignored while exhaustion, bans, host/CSRF gates and malformed bodies stay enforced',async()=>{
+ const host=await login(key),a=await login(),b=await login(),scope=await workshop(host),code=await invite(host,scope);
  expect((await call('host/invitations',a,{uses:1,shortCode:true},scope)).status).toBe(403);
  expect((await call('workshops/redeem-code',undefined,{code:code.code})).status).toBe(401);
  expect((await call('workshops/redeem-code',{...a,csrf:'wrong'},{code:code.code})).status).toBe(403);
  for(const value of [123456,[code.code],{code:code.code},'12','not-a-code'])expect((await call('workshops/redeem-code',a,{code:value})).status).toBe(400);
- app.db.run('UPDATE invitations SET expires_at=0 WHERE hash=?',[sha256(code.code)]);expect((await call('workshops/redeem-code',a,{code:code.code})).status).toBe(403);
+ app.db.run('UPDATE invitations SET expires_at=? WHERE hash=?',[1,sha256(code.code)]);
+ expect((await call('workshops/redeem-code',a,{code:code.code})).status).toBe(200);
+ expect((await call('workshops/redeem-code',b,{code:code.code})).status).toBe(403);
  const fresh=await invite(host,scope);await call('workshops/join',a,{},scope);await call('host/members/'+a.member.pubkey,host,{state:'banned',allowance:20},scope);
  expect((await call('workshops/redeem-code',a,{code:fresh.code})).status).toBe(403);expect((app.db.query('SELECT remaining FROM invitations WHERE hash=?').get(sha256(fresh.code)) as any).remaining).toBe(1);
 });
@@ -46,4 +48,12 @@ test('global attempts survive restart, cap newly created identities, and active 
  const a=await login();expect((await call('workshops/redeem-code',a,{code:'000000'})).status).toBe(403);
  app.db.close();app=application({origin,hostPubkey:getPublicKey(key),dataDir:dir,version:'restart'});
  const b=await login();expect((await call('workshops/redeem-code',b,{code:[...codes][0]})).status).toBe(429);
+});
+test('an already stored invitation with a past expiry remains redeemable after database restart',async()=>{
+ const host=await login(key),scope=await workshop(host),code=await invite(host,scope);
+ app.db.run('UPDATE invitations SET expires_at=1 WHERE hash=?',[sha256(code.code)]);
+ app.db.close();app=application({origin,hostPubkey:getPublicKey(key),dataDir:dir,version:'restart'});
+ const participant=await login();
+ expect((await call('workshops/redeem-code',participant,{code:code.code})).status).toBe(200);
+ expect((app.db.query('SELECT expires_at,remaining FROM invitations WHERE hash=?').get(sha256(code.code)) as any)).toEqual({expires_at:1,remaining:0});
 });

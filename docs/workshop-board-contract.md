@@ -180,25 +180,30 @@ remain covered by the existing host-only versioned save and decoration limits.
 
 ## Workshop invitations
 
-The host's visible Invite control creates a ten-use, 24-hour invitation for the
-selected workshop. Its dialog shows a locally generated QR, readonly copyable URL
-and six-digit code. Both the QR and URL use the configured browser origin and
+The host's visible Invite control creates a non-expiring, ten-admission invitation
+for the selected workshop. Its dialog states both properties and shows a locally
+generated QR, readonly copyable URL and six-digit code. Both the QR and URL use
+the configured browser origin and
 canonical `/?code=123456`; `/?code-123456` is accepted when opening a link.
 No external QR service receives invitation or donation data. QR generation uses
 pinned `qr` from [the maintained upstream library](https://github.com/paulmillr/qr).
 
 Hosts can request `{uses,shortCode:true}` through the existing host invitation
-endpoint; legacy long-token requests remain compatible. At most 100 live
+endpoint; legacy long-token requests remain compatible. At most 100 unexhausted
 invitations per workshop may be created. Codes use cryptographic randomness and
 are checked against all historical invitation hashes before insertion. Only the
-hash, expiry, remaining admissions and workshop are stored.
+hash, a backward-compatible non-expiring marker, remaining admissions and workshop
+are stored. Existing invitation rows remain in place; any legacy `expires_at`
+value, including a value in the past, is ignored so the invitation remains valid
+until its remaining admissions reach zero.
 
 `POST /api/v1/workshops/redeem-code` accepts `{code}` with a signed-in session,
 same-origin request and CSRF token. It resolves the invitation's workshop rather
 than trusting the selected workshop header. Membership and remaining uses change
 in one immediate transaction, including existing pending members in both legacy
-and scoped workshops. Banned members cannot redeem; expiry/exhaustion and workshop
-boundaries remain enforced. Existing admitted members do not consume another use.
+and scoped workshops. Banned members cannot redeem; exhaustion and workshop
+boundaries remain enforced. Time expiry is not an admission condition. Existing
+admitted members do not consume another use.
 A code grants workshop membership, never host privileges, private conversations,
 other workshops or anonymous board access.
 
@@ -222,7 +227,7 @@ navigations do not revive stale tab state. The scoped state permits reload while
 authentication is in progress. History and back/forward navigation re-run the
 same precedence rules. Successful redemption removes all canonical and shorthand
 invite parameters plus the scoped state while preserving unrelated parameters;
-failed or expired redemption keeps the authenticated profile on the retry form.
+failed redemption keeps the authenticated profile on the retry form.
 
 Short-code guesses require authentication and are limited by persistent ten-minute
 buckets: ten attempts per Nostr public key and 300 per installation, including

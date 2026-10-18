@@ -2,6 +2,7 @@ import { test, expect, beforeEach, afterEach } from "bun:test";
 import { generateSecretKey, getPublicKey, finalizeEvent } from "nostr-tools";
 import { mkdtempSync, rmSync } from "node:fs";
 import { application } from "../src/application.ts";
+import { sha256 } from "../src/assets.ts";
 import type { Config } from "../src/config.ts";
 const origin = "https://workshop.test";
 let app: ReturnType<typeof application>, directory: string, config: Config, hostSecret: Uint8Array;
@@ -52,6 +53,7 @@ test("site administrator can raise only their own admitted build allowance withi
 });
 test("invitation is atomic, finite, and never stores plaintext", async () => {
   const host = await login(hostSecret,{host:true}); const invite = (await call("/api/v1/host/invitations",{uses:1},host)).data;
+  app.db.run('UPDATE invitations SET expires_at=1 WHERE hash=?',[sha256(invite.token)]);
   const a = await login(generateSecretKey(),{invitation:invite.token}); expect(a.member.state).toBe("admitted");
   const challenge = (await call("/api/v1/challenge",{})).data;
   expect((await call("/api/v1/login",{challengeId:challenge.id,event:finalizeEvent(challenge.event,generateSecretKey()),identityType:"temporary",invitation:invite.token})).response.status).toBe(403);

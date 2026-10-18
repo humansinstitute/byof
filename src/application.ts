@@ -211,8 +211,8 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport?:(s
       if(towerSetupRoute&&method==='POST'){const [_,id,action]=towerSetupRoute;const selected=site.selection(request);return json(action==='create-intent'?towerConnector.intent(identity,id!,selected,body):action==='create'?await towerConnector.create(identity,id!,selected,body):await towerConnector.bind(identity,id!,selected,body));}
       if(path==='/api/v1/workshops/redeem-code'&&method==='POST'){
         codeAttempt(db,identity.pubkey);demand(typeof body.code==='string'&&/^\d{6}$/.test(body.code),400,'Enter a six-digit workshop code');
-        const invitation=db.query('SELECT workshop_id FROM invitations WHERE hash=? AND remaining>0 AND expires_at>=?').get(sha256(body.code),Math.floor(Date.now()/1000)) as any;
-        demand(invitation,403,'Invitation is invalid, expired or exhausted');
+        const invitation=db.query('SELECT workshop_id FROM invitations WHERE hash=? AND remaining>0').get(sha256(body.code)) as any;
+        demand(invitation,403,'Invitation is invalid or exhausted');
         const target=new Workshop(db,workshop.assets,invitation.workshop_id);
         const joined=target.join(target.scoped(identity),{invitation:body.code});return json({member:joined,workshopId:target.id});
       }
