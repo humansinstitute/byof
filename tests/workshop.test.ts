@@ -66,14 +66,15 @@ test("builder details remain private; active previews admit participants; mutati
 });
 test("runnable starters have private SHA256 assets and restrictive preview sandbox", async () => {
   await setup(); const hashes = new Set();
-  for (const starterId of ["cashu","nostr","spinner","dice","pong"]) {
+  for (const starterId of ["website","cashu","nostr","spinner","dice","pong"]) {
     const account = await login(), d = await create(account,starterId), revision = d.revisions[0]; hashes.add(revision.source_hash);
     const preview = await call(`/api/v1/projects/${d.project.id}/preview?revision=${revision.id}`,undefined,account);
     expect(preview.response.status).toBe(200); expect(preview.data).toContain("<!doctype html>");
+    if (starterId === "website") expect(preview.data).toContain("<h1>Hello world</h1>");
     expect(preview.response.headers.get("content-security-policy")).toContain("sandbox allow-scripts"); expect(preview.response.headers.get("content-security-policy")).toContain("connect-src https: wss:");
     expect((await call(`/objects/${revision.source_hash}`,undefined,account)).response.status).toBe(404);
   }
-  expect(hashes.size).toBe(5);
+  expect(hashes.size).toBe(6);
 });
 test("immutable restore creates a new revision and rejects stale concurrent restores", async () => {
   const {a} = await setup(), d = await create(a), path = `/api/v1/projects/${d.project.id}/restore`, body = {revisionId:d.project.current_revision,expectedRevisionId:d.project.current_revision};

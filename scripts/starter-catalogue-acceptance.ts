@@ -24,6 +24,7 @@ app = application({ dataDir: mkdtempSync(evidence + "/data-"), hostPubkey: null,
 app.db.run("UPDATE room SET admission='open' WHERE id=1");
 const browser = await chromium.launch({ executablePath: process.env.FREEDOM_BROWSER || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true });
 const starters = [
+  { title: "Simple website", heading: "Hello world" },
   { title: "SATCADE wallet", heading: "SATCADE" },
   { title: "Bush Bash Nostr", heading: "#bussobushbash" },
   { title: "Bitcoin spinner", heading: "Should I buy bitcoin?" },
@@ -52,7 +53,12 @@ async function openStarter(width: number, height: number, index: number) {
   const frame = page.frameLocator("iframe[data-napplet]");
   await expect(frame.getByRole("heading", { name: starter.heading, exact: true })).toBeVisible({ timeout: 15000 });
 
-  if (starter.title === "SATCADE wallet") {
+  if (starter.title === "Simple website") {
+    await expect(frame.locator("html")).toHaveAttribute("lang", "en");
+    await expect(frame.locator('meta[name="viewport"]')).toHaveAttribute("content", "width=device-width, initial-scale=1");
+    await expect(frame.getByText("This simple website is ready to become yours.", { exact: true })).toBeVisible();
+    expect(await frame.locator("html").evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  } else if (starter.title === "SATCADE wallet") {
     await expect(frame.getByRole("status")).toContainText("NO WALLET YET", { timeout: 15000 });
     await frame.getByRole("button",{name:"START WALLET"}).evaluate((element:HTMLButtonElement)=>element.click());
     await expect(frame.getByRole("status")).toContainText("WALLET READY",{timeout:15000});
@@ -96,7 +102,7 @@ async function openStarter(width: number, height: number, index: number) {
     }else{
       const canvas=frame.locator("#pong"),box=await canvas.boundingBox();expect(box).not.toBeNull();await page.mouse.move(box!.x+box!.width/2,box!.y+box!.height/4);await page.mouse.down();await page.mouse.move(box!.x+box!.width/2,box!.y+box!.height*3/4);await page.mouse.up();expect(await canvas.evaluate(()=>eval("state.left"))).toBe(initial.left);await page.keyboard.down("ArrowUp");await page.waitForTimeout(80);const movedUp=await canvas.evaluate(()=>eval("state.left"));await page.waitForTimeout(80);expect(await canvas.evaluate(()=>eval("state.left"))).toBeLessThan(movedUp);await page.keyboard.up("ArrowUp");const released=await canvas.evaluate(()=>eval("state.left"));await page.waitForTimeout(80);expect(await canvas.evaluate(()=>eval("state.left"))).toBe(released);await page.keyboard.down("ArrowDown");await page.waitForTimeout(120);await page.keyboard.up("ArrowDown");expect(await canvas.evaluate(()=>eval("state.left"))).toBeGreaterThan(released);
     }
-    const canvas=frame.locator("#pong");await canvas.press("Space");await expect(frame.getByRole("status")).toContainText("Game running");const runningX=await canvas.evaluate(()=>eval("state.x"));await page.waitForTimeout(100);expect(await canvas.evaluate(()=>eval("state.x"))).not.toBe(runningX);
+    const canvas=frame.locator("#pong");await canvas.press("Space");await expect(frame.getByRole("status")).toContainText("Game running");const runningX=await canvas.evaluate(()=>eval("state.x"));await expect.poll(()=>canvas.evaluate(()=>eval("state.x")),{timeout:1000}).not.toBe(runningX);
     await canvas.press("Space");await expect(frame.getByRole("status")).toContainText("Paused");const pausedX=await canvas.evaluate(()=>eval("state.x"));await page.waitForTimeout(100);expect(await canvas.evaluate(()=>eval("state.x"))).toBe(pausedX);
     await canvas.press("Space");await expect(frame.getByRole("status")).toContainText("Game running");expect(await canvas.evaluate(()=>eval("state.running"))).toBe(true);
     await canvas.evaluate(()=>eval("state.leftScore=3;state.rightScore=4;state.left=0;state.x=10"));await canvas.press("r");await expect(frame.getByRole("status")).toContainText("Reset. Game running. Score 0–0.");expect(await canvas.evaluate(()=>eval("({leftScore:state.leftScore,rightScore:state.rightScore,left:state.left,running:state.running})"))).toEqual({leftScore:0,rightScore:0,left:140,running:true});

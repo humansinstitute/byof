@@ -1,6 +1,8 @@
 # Workshop starter Napplets
 
-The starter catalogue contains exactly five self-contained Napplets:
+The starter catalogue contains exactly six self-contained Napplets:
+
+- **Simple website** is a deliberately minimal, responsive Hello world page. Its complete HTML and CSS are dependency-free and contain no credentials, data model or privileged Napplet capability, making it the clearest base for future sites and Napplets.
 
 - **SATCADE wallet** is a responsive 1990s-arcade wallet for receiving and sending sats. Receive generates a real scannable Lightning QR plus copy/open actions and honest pending/paid/issued states. Send accepts a BOLT11 invoice or Lightning address, shows an in-app review and then requires the trusted payment confirmation before funds leave. Its private per-user/project address book starts with `bitcoinbushbash@walletofsatoshi.com` and supports selection, additions and removal. The visible starter and catalogue copy deliberately contain no provider, hosting or internal architecture explanation; the trusted bridge documentation owns those details.
 - **Bush Bash Nostr** reads verified kind-1 events with `#t: ["bussobushbash"]` through `napplet.relay.query` and `napplet.relay.subscribe`. It distinguishes complete empty results from partial, failed and truncated reads and renders event content only with text DOM APIs.

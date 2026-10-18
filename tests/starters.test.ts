@@ -6,16 +6,28 @@ import { validateGeneratedHtml } from "../src/pipeline/artifact.ts";
 
 const byId = (id: string) => starters.find(starter => starter.id === id)!;
 
-test("catalogue contains exactly Pete's five starters and removes legacy entries", () => {
-  expect(starters.map(({ id }) => id)).toEqual(["cashu", "nostr", "spinner", "dice", "pong"]);
+test("catalogue contains the Simple website followed by Pete's existing starters and removes legacy entries", () => {
+  expect(starters.map(({ id }) => id)).toEqual(["website", "cashu", "nostr", "spinner", "dice", "pong"]);
   expect(starters.some(({ id }) => ["todo", "meme", "game", "quiz", "blank"].includes(id))).toBe(false);
   for (const starter of starters) {
     expect(validateGeneratedHtml(starter.source)).toBe(starter.source);
     const scripts = [...starter.source.matchAll(/<script>([\s\S]*?)<\/script>/gi)];
-    expect(scripts).toHaveLength(1);
-    expect(() => new Function(scripts[0]![1])).not.toThrow();
+    expect(scripts.length).toBeLessThanOrEqual(1);
+    if (scripts[0]) expect(() => new Function(scripts[0][1])).not.toThrow();
     expect(starter.source).not.toMatch(/<script\s+src|<iframe|<object|<embed|innerHTML|insertAdjacentHTML/i);
   }
+});
+
+test("Simple website is a minimal responsive dependency-free Hello world document", () => {
+  const starter = byId("website"), source = starter.source;
+  expect(starter.title).toBe("Simple website");
+  expect(starter.description).toBe("A clean Hello world page ready to make your own.");
+  expect(source.startsWith("<!doctype html>")).toBe(true);
+  expect(source).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">');
+  expect(source).toContain("<h1>Hello world</h1>");
+  expect(source).toContain("font-size: clamp(");
+  expect(source).not.toMatch(/<script|https?:|napplet\.|fetch\(|credential|token|password/i);
+  expect(source.match(/<h1>/g)).toHaveLength(1);
 });
 
 test("Cashu starter is a provider-neutral forkable arcade wallet with receive, send and private address book", () => {

@@ -1,5 +1,36 @@
 const shell = (title: string, body: string, script = "", style = "") => `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>*{box-sizing:border-box}body{margin:0;padding:20px;background:#e5ebd7;color:#20392f;font:16px system-ui}main{max-width:760px;margin:auto;background:white;border-radius:16px;padding:24px}button,input{font:inherit;padding:10px;border:1px solid #aebca4;border-radius:8px}button{cursor:pointer;background:#315d43;color:white}button:disabled{cursor:not-allowed;opacity:.55}input{width:100%}label{display:block;margin:12px 0}h1{font-size:26px;margin-top:0}.muted{color:#5e6c64}.status{padding:12px;border-radius:8px;background:#edf1e7;white-space:pre-wrap;overflow-wrap:anywhere}.error{background:#ffe7df;color:#742b16}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.row>*{flex:1}.codecopy{font:12px ui-monospace,monospace;word-break:break-all;user-select:all}.hidden{display:none!important}${style}</style><main>${body}</main><script>${script}</script></html>`;
 
+export const simpleWebsiteSource = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hello world</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: #f6f7f2;
+      color: #1d2a23;
+      font-family: system-ui, sans-serif;
+    }
+    main { max-width: 640px; text-align: center; }
+    h1 { margin: 0; font-size: clamp(2.5rem, 10vw, 5rem); }
+    p { margin: 1rem 0 0; font-size: 1.1rem; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Hello world</h1>
+    <p>This simple website is ready to become yours.</p>
+  </main>
+</body>
+</html>`;
+
 export const originalCashuSource = shell("SATCADE wallet", `
 <header><p class="eyebrow">PLAYER 1 · READY</p><h1>SATCADE</h1><p class="tagline">Pocket sats. Lightning speed.</p></header>
 <p class="status screen" id="status" role="status" aria-live="polite">LOADING WALLET…</p>
@@ -95,6 +126,7 @@ const pong = mouseFreePongSource
   .replace('function frame(){if(state.running){', 'function frame(){if(keys.has("ArrowUp")||keys.has("w")||keys.has("W"))movePaddle(-1,PADDLE_KEY_SPEED);if(keys.has("ArrowDown")||keys.has("s")||keys.has("S"))movePaddle(1,PADDLE_KEY_SPEED);if(state.running){');
 
 export const starters = [
+  { id: "website", icon: "<>", title: "Simple website", description: "A clean Hello world page ready to make your own.", source: simpleWebsiteSource },
   { id: "cashu", icon: "◉", title: "SATCADE wallet", description: "A retro arcade wallet for receiving and sending sats over Lightning.", source: cashu },
   { id: "nostr", icon: "#", title: "Bush Bash Nostr", description: "Browse verified #bussobushbash notes and live updates.", source: nostr },
   { id: "spinner", icon: "↻", title: "Bitcoin spinner", description: "Ask the important question. The answer is always Yes.", source: spinner },

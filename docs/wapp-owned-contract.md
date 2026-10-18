@@ -13,7 +13,7 @@ is invitation-only by default, with explicit pending/open policies available.
 
 ## Current capabilities
 
-The five starters contain runnable source. Projects have an independent logical
+The six starters contain runnable source. Projects have an independent logical
 conversation ID and immutable revisions. Restoring creates a new revision and
 requires the expected current revision. Shared and consented revision pointers
 are separate from the current draft. Forks copy the pinned shared source into a
