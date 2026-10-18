@@ -59,4 +59,9 @@ export class ManagedPipelineClient {
     return {accepted:true as const,runId:receipt.response.runId,receipt};
   }
   poll(storedRunId:string){return this.request(`/api/pipelines/runs/${encodeURIComponent(storedRunId)}`,"GET")}
+  delivery(storedRunId:string){return this.request(`/api/pipelines/runs/${encodeURIComponent(storedRunId)}/delivery`,"GET")}
+  publicationPreflight(){return this.request(`/api/pipelines/definitions/${encodeURIComponent(this.config.definitionId)}/publication-preflight`,"GET")}
+  /** Requeues the retained immutable delivery only. This operation never resumes
+   * or starts a pipeline run. Autopilot owns its idempotency and writer fence. */
+  retryDelivery(storedRunId:string){return this.request(`/api/pipelines/runs/${encodeURIComponent(storedRunId)}/delivery/retry`,"POST")}
 }

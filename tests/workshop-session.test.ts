@@ -41,15 +41,17 @@ test('admin board → invite join → first dispatch; existing boards resume; no
     expect((await call(`projects/${oldProject.id}/requests`,{requestId:oldRequest,prompt:'Build a counter',mode:'build',expectedRevisionId:oldProject.current_revision},user,existing.id)).data.generationAvailable).toBe(false);
     const scope={ownerPubkey:admin.member.pubkey,builderRoot:dir+'/napplets',workshopId:app.site.legacy(),fileVersions:true,legacy:{projectId:crypto.randomUUID(),ownerPubkey:admin.member.pubkey,conversationKey:crypto.randomUUID(),directory:dir+'/legacy'},dataDir:dir};
     const credential=dir+'/broker.cap';writeFileSync(credential,'a'.repeat(43),{mode:0o600});
-    config.followup={...scope.legacy,workshopId:scope.workshopId,fileVersions:true,replacementEnabled:true,builderRoot:scope.builderRoot,brokerUrl:'http://127.0.0.1:3256/api/internal/wapps/pipelines',credentialFile:credential,origin,definitionId:'member-builder',callbackUrl:origin+'/api/v1/pipeline/callback',appPubkey:getPublicKey(appKey),approvedRequestId:''} as FollowupConfig;
+    config.followup={...scope.legacy,workshopId:scope.workshopId,fileVersions:true,replacementEnabled:true,agentPublication:true,builderRoot:scope.builderRoot,brokerUrl:'http://127.0.0.1:3256/api/internal/wapps/pipelines',credentialFile:credential,origin,definitionId:'member-builder',callbackUrl:origin+'/api/v1/pipeline/callback',appPubkey:getPublicKey(appKey),approvedRequestId:''} as FollowupConfig;
     app.db.close();app=application(config);
     globalThis.fetch=(async (url:any,init:any)=>{
       expect(String(url)).toBe(config.followup!.brokerUrl);
-      const envelope=JSON.parse(init.body), payload=JSON.parse(envelope.serializedBody), input=payload.input;
+      const envelope=JSON.parse(init.body);
+      const target=new URL(envelope.path,origin).href, bodyHash=envelope.serializedBody?sha256(envelope.serializedBody):null;
+      const event=finalizeEvent({kind:27235,created_at:Math.floor(Date.now()/1000),content:'',tags:[['u',target],['method',envelope.method],...(bodyHash?[['payload',bodyHash]]:[])]},appKey);
+      if(envelope.method==='GET'&&envelope.path.endsWith('/publication-preflight'))return Response.json({httpStatus:200,response:{protocol:'native-project-tools-v1',publicationTool:'napplet.publish',ready:true},receipt:{url:target,method:'GET',bodyHash:null,event}});
+      const payload=JSON.parse(envelope.serializedBody), input=payload.input;
       const prepared=prepareWorkshopFollowup(input,scope);inputs.push(input);
       expect(prepared.directory).toBe(`${scope.builderRoot}/${input.workshopId}/${input.projectId}`);
-      const target=new URL(envelope.path,origin).href, bodyHash=sha256(envelope.serializedBody);
-      const event=finalizeEvent({kind:27235,created_at:Math.floor(Date.now()/1000),content:'',tags:[['u',target],['method','POST'],['payload',bodyHash]]},appKey);
       return Response.json({httpStatus:200,response:{runId:crypto.randomUUID()},receipt:{url:target,method:'POST',bodyHash,event}});
     }) as typeof fetch;
     const resumed=await call(`projects/${oldProject.id}/requests/${oldRequest}/resume`,{},user,existing.id);

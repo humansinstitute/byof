@@ -2,6 +2,7 @@ import {loadBuilderEngine,builderAgents,runtimeForAgent} from './builder-engine.
 import {runtimeAvailable} from './pipeline/builder-runtime.ts';
 import {cancelUnsentRequest} from './queued-recovery.ts';
 import { recoverWorkshopBuilders } from './workshop-recovery.ts';
+import {reconcileAcceptedRun,reconcileStaleBuildingRequests} from './stale-building-recovery.ts';
 import { installActivityTables, storeActivity } from './activity-store.ts';
 import { verifyActivity } from './pipeline/activity-receiver.ts';
 import encodeQR from 'qr';
@@ -273,6 +274,8 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport?:(s
       if (lifecycle && method === 'DELETE') return json(retireBuilder(workshop,member,lifecycle[1]!,body.generation));
       const recovery = path.match(/^\/api\/v1\/projects\/([^/]+)\/requests\/([^/]+)\/resume$/);
       if (recovery && method === 'POST') return json({ request: await resumeFollowup(workshop, member, recovery[1]!, recovery[2]!, config.followup) }, 202);
+      const deliveryRecovery=path.match(/^\/api\/v1\/projects\/([^/]+)\/requests\/([^/]+)\/recover-result$/);
+      if(deliveryRecovery&&method==='POST')return json({recovery:await reconcileAcceptedRun(workshop,member,deliveryRecovery[1]!,deliveryRecovery[2]!,config.followup)},202);
       const cancellation=path.match(/^\/api\/v1\/projects\/([^/]+)\/requests\/([^/]+)\/cancel$/);
       if(cancellation&&method==='POST')return json({request:cancelUnsentRequest(workshop,member,cancellation[1]!,cancellation[2]!)});
       const engineCorrection=path.match(/^\/api\/v1\/host\/projects\/([^/]+)\/requests\/([^/]+)\/builder-engine$/);
@@ -386,7 +389,7 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport?:(s
   async function recoverBuilders() {
     if(recovering)return;
     recovering=true;
-    try {await recoverWorkshopBuilders(new Workshop(db,workshop.assets),auth,workshopBuilders(rootConfig.followup),undefined,{storageReady:id=>{const w=new Workshop(db,workshop.assets,id),storage=site.storage(id);return !(w.roomRow().tower_id||storage)||!!storage&&storageStatus(w,storage).state==='ready';},storageRequired:id=>{const storage=site.storage(id);return !!storage && storageStatus(new Workshop(db,workshop.assets,id),storage).binding?.status==='ready';}});}
+    try {const capable=workshopBuilders(rootConfig.followup);await recoverWorkshopBuilders(new Workshop(db,workshop.assets),auth,capable,undefined,{storageReady:id=>{const w=new Workshop(db,workshop.assets,id),storage=site.storage(id);return !(w.roomRow().tower_id||storage)||!!storage&&storageStatus(w,storage).state==='ready';},storageRequired:id=>{const storage=site.storage(id);return !!storage && storageStatus(new Workshop(db,workshop.assets,id),storage).binding?.status==='ready';}});await reconcileStaleBuildingRequests(new Workshop(db,workshop.assets),auth,capable);}
     finally {recovering=false;for(const listener of listeners){try{listener();}catch{}}}
   }
   return { db, auth, workshop, site, publication, handle: handleAndNotify, originOf, recoverBuilders,

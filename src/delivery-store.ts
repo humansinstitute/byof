@@ -10,6 +10,7 @@ import { applyDelivery, DeliveryDenied, type VerifiedDelivery } from "./pipeline
 import { now } from "./auth.ts";
 import { demand, HttpError } from "./errors.ts";
 import { limits } from "./config.ts";
+export const staleBuildingSeconds=120;
 export function installDeliveryTables(db: Database) {
   installAgentPublication(db);
   db.exec(`CREATE TABLE IF NOT EXISTS delivery_receipts (delivery_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, request_id TEXT NOT NULL REFERENCES requests(id), body_hash TEXT NOT NULL, status TEXT NOT NULL, result_json TEXT NOT NULL, created_at INTEGER NOT NULL);
@@ -17,6 +18,7 @@ export function installDeliveryTables(db: Database) {
     CREATE TABLE IF NOT EXISTS build_receipts(request_id TEXT PRIMARY KEY REFERENCES requests(id),revision_id TEXT NOT NULL REFERENCES revisions(id),receipt_json TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS request_recoveries(request_id TEXT PRIMARY KEY REFERENCES requests(id),previous_run TEXT NOT NULL,execution_key TEXT NOT NULL UNIQUE,input_json TEXT NOT NULL,claimed_at INTEGER NOT NULL DEFAULT 0,new_run TEXT,receipt_json TEXT);
     CREATE TABLE IF NOT EXISTS automatic_recovery(request_id TEXT PRIMARY KEY REFERENCES requests(id),attempts INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS request_delivery_reconciliation(request_id TEXT PRIMARY KEY REFERENCES requests(id),run_id TEXT NOT NULL,state TEXT NOT NULL,remote_status TEXT,delivery_status TEXT,message TEXT NOT NULL,automatic_attempts INTEGER NOT NULL DEFAULT 0,retry_requests INTEGER NOT NULL DEFAULT 0,next_check_at INTEGER NOT NULL DEFAULT 0,checked_at INTEGER NOT NULL DEFAULT 0,recovered_at INTEGER);
     CREATE TABLE IF NOT EXISTS delivery_events (event_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL);`);
   repairStaleBuildingRequests(db);
 }
@@ -33,6 +35,31 @@ export function repairStaleBuildingRequests(db: Database) {
            ORDER BY d.created_at DESC,d.rowid DESC
            LIMIT 1)='execution_uncertain'`).changes;
 }
+function agentPublicationRequired(db:Database,request:any){
+  if(request.mode!=='build')return false;
+  const recovery=db.query('SELECT input_json FROM request_recoveries WHERE request_id=?').get(request.id) as any;
+  if(!recovery)return false;
+  let agentTool=false;try{agentTool=JSON.parse(recovery.input_json).replacementContext?.fileBuild?.publication==='agent-tool-v1';}catch{}
+  const publication=db.query('SELECT status FROM agent_publications WHERE request_id=?').get(request.id) as any;
+  return agentTool&&publication?.status!=='published';
+}
+export function requestDeliveryRecovery(db:Database,request:any){
+  if(!request?.run_id)return null;
+  const row=db.query('SELECT * FROM request_delivery_reconciliation WHERE request_id=? AND run_id=?').get(request.id,request.run_id) as any;
+  const delivered=!!db.query('SELECT delivery_id FROM delivery_receipts WHERE request_id=? AND run_id=?').get(request.id,request.run_id);
+  if(delivered&&!row)return null;
+  const publicationRequired=delivered&&agentPublicationRequired(db,request);
+  if(delivered){
+    const publication=db.query('SELECT error FROM agent_publications WHERE request_id=?').get(request.id) as any;
+    const state=publicationRequired?(publication?.error?'publication_failed':'publication_pending'):'recovered';
+    const message=state==='publication_failed'?`The saved reply was recovered, but app publication failed: ${String(publication.error).slice(0,1000)}`:state==='publication_pending'?'The saved reply was recovered. The app change is not published yet.':'The saved result was recovered without rebuilding.';
+    return {state,message,available:false,remoteStatus:row?.remote_status??null,deliveryStatus:'delivered',retryRequests:row?.retry_requests??0};
+  }
+  const stale=request.status==='building'&&now()-request.created_at>=staleBuildingSeconds;
+  if(!row&&!stale)return null;
+  const state=row?.state??'available';
+  return {state,message:row?.message??'This accepted request is taking longer than expected. Check the retained run and recover its existing result without rebuilding.',available:stale&&['available','delivery_failed_recoverable'].includes(state),remoteStatus:row?.remote_status??null,deliveryStatus:row?.delivery_status??null,retryRequests:row?.retry_requests??0};
+}
 // Bind only from an accepted server-side dispatch receipt. No browser route accepts run IDs.
 export function bindRun(db: Database, requestId: string, runId: string) {
   demand(typeof runId === "string" && runId.length > 0 && runId.length <= 200, 400, "Invalid accepted run");
@@ -41,7 +68,8 @@ export function bindRun(db: Database, requestId: string, runId: string) {
   db.run("UPDATE requests SET run_id=? WHERE id=?", [runId, requestId]);
 }
 export function storeDelivery(db: Database, delivery: VerifiedDelivery, workshop?: Workshop) {
-  return db.transaction(() => applyDelivery(delivery, {
+  return db.transaction(() => {
+    const handling=applyDelivery(delivery, {
     hasEvent: id => !!db.query("SELECT event_id FROM delivery_events WHERE event_id=?").get(id),
     deliveryHash: id => (db.query("SELECT body_hash FROM delivery_receipts WHERE delivery_id=?").get(id) as any)?.body_hash || null,
     requestForRun: runId => { const row = db.query("SELECT id,project_id FROM requests WHERE run_id=?").get(runId) as any; return row ? { requestId: row.id, projectId: row.project_id } : null; },
@@ -170,5 +198,21 @@ export function storeDelivery(db: Database, delivery: VerifiedDelivery, workshop
       db.run("INSERT INTO delivery_receipts VALUES(?,?,?,?,?,?,?)", [envelope.deliveryId, envelope.runId, request.id, verified.bodyHash, status, JSON.stringify(envelope), now()]);
     },
     recordEvent: eventId => { db.run("INSERT INTO delivery_events VALUES(?,?)", [eventId, now()]); },
-  }))();
+    });
+    const mapped=db.query('SELECT request_id FROM delivery_receipts WHERE delivery_id=? AND run_id=?').get(delivery.envelope.deliveryId,delivery.envelope.runId) as any;
+    if(mapped){
+      const request=db.query('SELECT * FROM requests WHERE id=?').get(mapped.request_id) as any;
+      const publication=db.query('SELECT error FROM agent_publications WHERE request_id=?').get(mapped.request_id) as any;
+      const required=agentPublicationRequired(db,request);
+      const state=required?(publication?.error?'publication_failed':'publication_pending'):'recovered';
+      const message=state==='publication_failed'
+        ? `The saved reply was recovered, but app publication failed: ${String(publication.error).slice(0,1000)}`
+        : state==='publication_pending'
+          ? 'The saved reply was recovered. The app change is not published yet.'
+          : 'The saved result was recovered without rebuilding.';
+      db.run(`UPDATE request_delivery_reconciliation SET state=?,message=?,delivery_status='delivered',checked_at=?,recovered_at=? WHERE request_id=? AND run_id=?`,
+        [state,message,now(),now(),mapped.request_id,delivery.envelope.runId]);
+    }
+    return handling;
+  })();
 }

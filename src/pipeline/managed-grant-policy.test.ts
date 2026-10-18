@@ -9,6 +9,8 @@ test("managed policy permits only fixed pipeline/callback and owned reads",()=>{
   expect(authorizePipelineHttp(grant,start,context).bodyHash).toMatch(/^[0-9a-f]{64}$/);
   for(const path of ["/api/pipelines/runs/own","/api/pipelines/runs/own/delivery","/api/pipelines/webhook-signer"])
     expect(authorizePipelineHttp(grant,{url:grant.origin+path,method:"GET",body:null},context)).toEqual({bodyHash:null});
+  expect(authorizePipelineHttp(grant,{url:grant.origin+"/api/pipelines/runs/own/delivery/retry",method:"POST",body:null},context)).toEqual({bodyHash:null});
+  expect(authorizePipelineHttp(grant,{url:grant.origin+"/api/pipelines/definitions/"+encodeURIComponent(grant.definitionId)+"/publication-preflight",method:"GET",body:null},context)).toEqual({bodyHash:null});
 });
 test("app drift, expiry, foreign runs/definitions, redirects and arbitrary bodies denied",()=>{
   for(const app of [{...context.app,id:"other"},{...context.app,ownerNpub:"other"},{...context.app,root:"/changed"},{...context.app,pubkey:"other"}])
@@ -17,6 +19,9 @@ test("app drift, expiry, foreign runs/definitions, redirects and arbitrary bodie
   for(const request of [{...start,url:start.url.replace("autopilot.example","foreign.example")},
     {...start,url:start.url+"?arbitrary=true"},{...start,method:"DELETE"},
     {url:grant.origin+"/api/pipelines/runs/foreign",method:"GET",body:null},
+    {url:grant.origin+"/api/pipelines/runs/foreign/delivery/retry",method:"POST",body:null},
+    {url:grant.origin+"/api/pipelines/runs/own/delivery/retry",method:"POST",body:"{}"},
+    {url:grant.origin+"/api/pipelines/definitions/foreign/publication-preflight",method:"GET",body:null},
     {...start,body:JSON.stringify({...payload,webhook:{url:"https://other.example/result"}})},
     {...start,body:JSON.stringify({...payload,input:{...payload.input,requestId:"changed"}})},
     {...start,body:JSON.stringify({...payload,input:{...payload.input,directory:"/host"}})},

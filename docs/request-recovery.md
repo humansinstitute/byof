@@ -36,3 +36,27 @@ Publishing remains an explicit agent tool operation. The publication receipt and
 ordinary final-message webhook stay separate. Recovery success is not evidence
 that an app was published; verify the managed artifact, registered app version,
 frontend link and independent final-message receipt.
+
+## Accepted run delivery recovery
+
+An accepted request that remains `building` for two minutes becomes eligible for
+delivery reconciliation. Freedom Tools reads only the exact saved run through
+its installation-scoped managed pipeline authority. A nonterminal run remains
+building and exposes its remote state. A terminal run with no matching local
+delivery receipt uses Autopilot's same-delivery retry operation. This rearms the
+retained immutable callback; it does not submit the definition again, rerun the
+agent, construct a callback locally, or inspect terminal prose for an artifact.
+
+Automatic checks are persisted, exponentially delayed, and stop after six
+attempts. The owner or Canvas host can still choose **Recover result** afterward.
+Repeated controls are locally coalesced for 15 seconds, while the trusted remote
+operation and signed callback remain independently idempotent. Foreign run or
+delivery IDs fail correlation without any retry.
+
+The UI reports still running, retrying delivery, failed/recoverable,
+authorization unavailable, unsupported recovery, recovered, and publication
+pending/failed states. An
+answer-only final message can therefore recover without an app version. For an
+implementation turn, final-message recovery may complete while publication is
+still missing; the app is not described as live until its independently supplied
+published version is registered and loadable.

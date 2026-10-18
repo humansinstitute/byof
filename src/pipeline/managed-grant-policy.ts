@@ -32,7 +32,10 @@ export function authorizePipelineHttp(grant:PipelineGrant,request:ScopedHttpRequ
         Object.keys(body.input).some(k=>!["requestId","projectId","prompt","contextRefs"].includes(k))) throw new Error("pipeline_body_denied");
     return {bodyHash:createHash("sha256").update(request.body).digest("hex")};
   }
+  const deliveryRetry=url.pathname.match(/^\/api\/pipelines\/runs\/([^/]+)\/delivery\/retry$/);
+  if(request.method==="POST"&&request.body===null&&deliveryRetry&&context.ownsRun(decodeURIComponent(deliveryRetry[1]!),grant.appId))return {bodyHash:null};
   if (request.method!=="GET" || request.body!==null) throw new Error("pipeline_method_denied");
+  if(url.pathname===`/api/pipelines/definitions/${encodeURIComponent(grant.definitionId)}/publication-preflight`)return {bodyHash:null};
   if (url.pathname==="/api/pipelines/webhook-signer") return {bodyHash:null};
   const run=url.pathname.match(/^\/api\/pipelines\/runs\/([^/]+)(?:\/delivery)?$/);
   if (!run || !context.ownsRun(decodeURIComponent(run[1]),grant.appId)) throw new Error("pipeline_run_denied");

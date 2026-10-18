@@ -16,7 +16,7 @@ import { now } from '../auth.ts';
 import {neverDispatched,preparationFailed} from '../queued-recovery.ts';
 import { ManagedPipelineClient } from './managed-client.ts';
 import {materializeRequestAttachments} from '../chat-attachments.ts';
-type Transport={poll:(id:string)=>Promise<any>;submit:(input:any,key:string)=>Promise<any>};
+type Transport={poll:(id:string)=>Promise<any>;submit:(input:any,key:string)=>Promise<any>;publicationPreflight?:()=>Promise<any>};
 function missingBeforeSend(result:any,requestId:string,projectId:string,key:string) {
   const turn=result?.result?.turn;
   return result?.status==='error' && turn?.status==='preparing' &&
@@ -50,6 +50,22 @@ async function prepareReplacement(workshop:Workshop,member:Member,projectId:stri
   }
   demand(!config.builderRuntime||runtimeAvailable(config,config.builderRuntime),503,'Saved builder engine is not activated');
   const client=transport ?? new ManagedPipelineClient(config);
+  if(!saved.run_id&&!recovery&&config.fileVersions&&saved.mode!=='answer'&&client.publicationPreflight){
+    if(!config.agentPublication){
+      db.run("UPDATE requests SET status='unavailable',error='App changes are paused because scoped publication authority is not installed. Your saved app is unchanged; no agent ran.' WHERE id=?",[requestId]);
+      return db.query('SELECT * FROM requests WHERE id=?').get(requestId);
+    }
+    try{
+      const preflight=(await client.publicationPreflight())?.response;
+      if(preflight?.protocol!=='native-project-tools-v1'||preflight.publicationTool!=='napplet.publish'||preflight.ready!==true){
+        db.run("UPDATE requests SET status='unavailable',error='App changes are paused because scoped publication authority is unavailable. Your saved app is unchanged; no agent ran. Ask the Canvas host to restore the managed publication tool.' WHERE id=?",[requestId]);
+        return db.query('SELECT * FROM requests WHERE id=?').get(requestId);
+      }
+    }catch{
+      db.run("UPDATE requests SET status='unavailable',error='App changes are paused because publication authority could not be verified. Your saved app is unchanged; no agent ran. Ask the Canvas host to check the managed Autopilot connection.' WHERE id=?",[requestId]);
+      return db.query('SELECT * FROM requests WHERE id=?').get(requestId);
+    }
+  }
   if(!config.selectableBuilder&&config.builderRuntime&&recovery&&!sameBuilderRuntime(JSON.parse(recovery.input_json).builderRuntime)){
     demand(config.receiptRecovery&&!config.receiptRecovery.builderRuntime,409,'Previous native request needs its original Codex recovery pipeline before Goose migration');
     return dispatchReplacement(workshop,member,projectId,requestId,workshopBuilders(config.receiptRecovery)!,transport,options);

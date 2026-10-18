@@ -51,3 +51,33 @@ test("remote managed broker rejects widened origins and missing scoped credentia
   expect(()=>new ManagedPipelineClient(base)).toThrow("managed_remote_binding_denied");
   expect(()=>new ManagedPipelineClient({...base,clientOrigin:"https://byof.example",brokerUrl:"http://autopilot.example/api/wapps/remote-managed-pipelines"})).toThrow("managed_remote_broker_denied");
 });
+test("same-delivery retry sends an empty POST and verifies the exact signed broker receipt",async()=>{
+  const dir=mkdtempSync(join(tmpdir(),"managed-delivery-retry-")),credentialFile=join(dir,"grant.cap"),key=generateSecretKey();
+  writeFileSync(credentialFile,"C".repeat(43),{mode:0o600});
+  const config={brokerUrl:"http://127.0.0.1:3600/api/internal/wapps/pipelines",credentialFile,origin:"https://autopilot.example",
+    definitionId:"definition",callbackUrl:"https://receiver.example/result",appPubkey:getPublicKey(key)};
+  try{
+    const client=new ManagedPipelineClient({...config,fetch:(async(_url,options)=>{
+      const request=JSON.parse(String(options!.body));
+      expect(request).toEqual({path:"/api/pipelines/runs/run%2Fexact/delivery/retry",method:"POST"});
+      const target=config.origin+request.path,event=finalizeEvent({kind:27235,created_at:Math.floor(Date.now()/1000),content:"",tags:[["u",target],["method","POST"]]},key);
+      return Response.json({response:{outcome:"requeued",delivery:{runId:"run/exact",status:"pending"}},httpStatus:202,receipt:{url:target,method:"POST",event,bodyHash:null}},{status:202});
+    }) as typeof fetch});
+    expect((await client.retryDelivery('run/exact')).response).toMatchObject({outcome:'requeued',delivery:{runId:'run/exact'}});
+  }finally{rmSync(dir,{recursive:true,force:true})}
+});
+test("publication preflight uses the pinned definition and an empty signed GET",async()=>{
+  const dir=mkdtempSync(join(tmpdir(),"managed-publication-preflight-")),credentialFile=join(dir,"grant.cap"),key=generateSecretKey();
+  writeFileSync(credentialFile,"D".repeat(43),{mode:0o600});
+  const config={brokerUrl:"http://127.0.0.1:3600/api/internal/wapps/pipelines",credentialFile,origin:"https://autopilot.example",
+    definitionId:"user:app:definition",callbackUrl:"https://receiver.example/result",appPubkey:getPublicKey(key)};
+  try{
+    const client=new ManagedPipelineClient({...config,fetch:(async(_url,options)=>{
+      const request=JSON.parse(String(options!.body));
+      expect(request).toEqual({path:"/api/pipelines/definitions/user%3Aapp%3Adefinition/publication-preflight",method:"GET"});
+      const target=config.origin+request.path,event=finalizeEvent({kind:27235,created_at:Math.floor(Date.now()/1000),content:"",tags:[["u",target],["method","GET"]]},key);
+      return Response.json({response:{protocol:'native-project-tools-v1',publicationTool:'napplet.publish',ready:true},httpStatus:200,receipt:{url:target,method:"GET",event,bodyHash:null}});
+    }) as typeof fetch});
+    expect((await client.publicationPreflight()).response).toMatchObject({ready:true,publicationTool:'napplet.publish'});
+  }finally{rmSync(dir,{recursive:true,force:true})}
+});
