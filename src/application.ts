@@ -41,7 +41,7 @@ import {chatAttachmentStatus,prepareChatAttachment} from './chat-attachments.ts'
 import { Workshop } from "./workshop.ts";
 import {authorizeWorkshopFollowup} from './pipeline/workshop-prepare.ts';
 import {authorizeConfigurableBuilder} from './pipeline/configurable-prepare.ts';
-import {upgradeUntouchedOriginalSpinners} from './starter-upgrades.ts';
+import {upgradeUntouchedOriginalCashuWallets,upgradeUntouchedOriginalPongProjects,upgradeUntouchedOriginalSpinners} from './starter-upgrades.ts';
 // Sandboxed frames have an opaque origin. The parent binds capability messages to the exact frame;
 // the existing Escape/focus signals remain separate from the capability channel.
 const previewEscapeBridge = nappletRuntimeBootstrap('00000000-0000-0000-0000-000000000000').suffix;
@@ -49,6 +49,8 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport?:(s
   const config=rootConfig;
   const db = openDatabase(config.dataDir), assets=new Assets(join(config.dataDir, "objects"));
   upgradeUntouchedOriginalSpinners(db,assets);
+  upgradeUntouchedOriginalCashuWallets(db,assets);
+  upgradeUntouchedOriginalPongProjects(db,assets);
   const auth = new Auth(db, config), workshop = new Workshop(db, assets);
   Workshop.siteAdminProviders.set(db,pubkey=>auth.isHost(pubkey));
   installSite(db,config); installBoard(workshop); installProfileStore(db); const site=new Site(db,config); const towerConnector=new TowerConnect(site,workshop.assets); installDeliveryTables(db); installActivityTables(db); installStorageTables(workshop); workshop.storageRequired=!!config.storage;

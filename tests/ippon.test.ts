@@ -27,6 +27,8 @@ function fixture(options: { timeoutMs?: number } = {}) {
     if (parsed.pathname === '/v1/wallet' && init.method === 'GET') return Response.json(wallet(secret + '1'));
     if (parsed.pathname === '/v1/wallet/deposit' && init.method === 'POST') return Response.json({ quote, request: invoice, state: 'UNPAID', expiry: null, access_key: secret, unexpected: { secret } });
     if (parsed.pathname === `/v1/wallet/deposit/${quote}` && init.method === 'GET') return Response.json({ quote, request: invoice, state: 'ISSUED', expiry: 123456, access_key: secret, unexpected: { secret } });
+    if (parsed.pathname === '/v1/wallet/pay' && init.method === 'POST' && mode === 'insufficient') return Response.json({ error: { statusCode: 400, name: 'VALIDATION_ERROR', message: 'Insufficient balance for melt: 21 < 23', params: { credential: secret } }, unrelated: secret }, { status: 400 });
+    if (parsed.pathname === '/v1/wallet/pay' && init.method === 'POST' && mode === 'arbitrary4xx') return Response.json({ code: 'VALIDATION_ERROR', message: 'Insufficient balance for melt: 21 < 23', error: { statusCode: 400, name: 'VALIDATION_ERROR', message: `Insufficient balance for melt: 21 < 23; ${secret}`, params: { url: `https://${secret}.example`, stack: secret } } }, { status: 400 });
     if (parsed.pathname === '/v1/wallet/pay' && init.method === 'POST') return Response.json({ quote: paymentQuote, amount: JSON.parse(String(init.body)).amount, fee_reserve: 2, state: 'PENDING', payment_preimage: null, expiry: 123456, access_key: secret, unexpected: { secret } });
     if (parsed.pathname === `/v1/wallet/pay/${paymentQuote}` && init.method === 'GET') return Response.json({ quote: paymentQuote, amount: 21, fee_reserve: 2, state: 'PAID', payment_preimage: 'preimage-safe', expiry: 123456, access_key: secret, unexpected: { secret } });
     return Response.json({ error: 'missing' }, { status: 404 });
@@ -108,6 +110,26 @@ test('payment validation, cancellation and expiry fail closed before the upstrea
     const expiring = await f.call('napplet/cashu', { token, method: 'paymentPreview', bolt11Request: f.invoice, amount: 21 }, account), originalNow = Date.now;
     try { Date.now = () => originalNow() + 56_000; expect((await f.call('napplet/cashu', { token, method: 'pay', bolt11Request: f.invoice, amount: 21, unit: 'sat', confirmationToken: expiring.data.confirmationToken }, account)).status).toBe(403); } finally { Date.now = originalNow; }
     expect(f.calls.length).toBe(before);
+  } finally { f.app.db.close(); }
+});
+
+test('exact-balance melt validation is actionable while arbitrary upstream errors and secrets remain hidden', async () => {
+  const f = fixture();
+  try {
+    const account = await f.login(f.ownerKey), project = (await f.call('projects', { starterId: 'cashu' }, account)).data.project, token = (await f.open(project, account)).data.token;
+    await f.call('napplet/cashu', { token, method: 'connect' }, account);
+    f.setMode('insufficient');
+    let preview = await f.call('napplet/cashu', { token, method: 'paymentPreview', lightningAddress: 'bitcoinbushbash@walletofsatoshi.com', amount: 21 }, account);
+    const insufficient = await f.call('napplet/cashu', { token, method: 'pay', lightningAddress: preview.data.destination, amount: 21, unit: 'sat', confirmationToken: preview.data.confirmationToken }, account);
+    expect(insufficient.status).toBe(400);
+    expect(insufficient.data.error).toBe('Not enough balance to cover the payment and Lightning fee. Add a few sats or send a smaller amount.');
+    expect(insufficient.raw).not.toContain(f.secret); expect(insufficient.raw).not.toContain('melt'); expect(insufficient.raw).not.toContain('21 < 23');
+
+    f.setMode('arbitrary4xx');
+    preview = await f.call('napplet/cashu', { token, method: 'paymentPreview', lightningAddress: 'bitcoinbushbash@walletofsatoshi.com', amount: 21 }, account);
+    const arbitrary = await f.call('napplet/cashu', { token, method: 'pay', lightningAddress: preview.data.destination, amount: 21, unit: 'sat', confirmationToken: preview.data.confirmationToken }, account);
+    expect(arbitrary.status).toBe(502); expect(arbitrary.data.error).toBe('Wallet service rejected the request');
+    expect(arbitrary.raw).not.toContain(f.secret); expect(arbitrary.raw).not.toContain('melt'); expect(arbitrary.raw).not.toContain('https://'); expect(arbitrary.raw).not.toContain('stack');
   } finally { f.app.db.close(); }
 });
 

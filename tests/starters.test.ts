@@ -21,6 +21,10 @@ test("catalogue contains exactly Pete's five starters and removes legacy entries
 test("Cashu starter is a provider-neutral forkable arcade wallet with receive, send and private address book", () => {
   const source = byId("cashu").source;
   for (const method of ["napplet.cashu.status()", "napplet.cashu.connect()", "napplet.cashu.createDeposit(amount)", "napplet.cashu.checkDeposit(currentDeposit.quote)", "napplet.cashu.pay(", "napplet.cashu.checkPayment(currentPayment.quote)", "napplet.cashu.disconnect()", 'napplet.storage.get("wallet.addressBook.v1")', 'napplet.storage.set("wallet.addressBook.v1",contacts)']) expect(source).toContain(method);
+  expect(source).toContain('id="receiveAmount" inputmode="numeric" type="number" min="1" max="100000" step="1" value="42"');
+  expect(source).toContain('id="sendAmount" inputmode="numeric" type="number" min="1" max="100000" step="1" value="21"');
+  expect(source).toContain('walletBalance=data.balance');
+  expect(source).toContain('if(amount>=walletBalance)throw Error("Leave a few sats for the Lightning fee. Send less than your current balance.")');
   expect(source).toContain('state==="ISSUED"');
   expect(source).toContain('id="invoiceQr"'); expect(source).toContain('src=data.qr'); expect(source).toContain('href="lightning:"+data.invoice');
   expect(source).toContain("bitcoinbushbash@walletofsatoshi.com"); expect(source).toContain("PAYMENT DENIED · NO FUNDS SENT");
@@ -65,14 +69,22 @@ test("spinner always resolves Yes and dice creates exactly 100 unbiased bounded 
   expect(dice).toContain('" · Total: "+rolls.length');
 });
 
-test("Pong is immediately playable and contains no payment or unlock behavior", () => {
+test("Pong starts stationary with documented keyboard and discrete touch controls", () => {
   const source = byId("pong").source;
   expect(byId("pong").title).toBe("Pong");
   expect(source).toContain("<h1>Pong</h1>");
+  expect(source).toContain("↑/↓ move · Space starts or pauses · R resets and starts");
+  expect(source).toContain("Ready. Press Space or Start. Score 0–0.");
   expect(source).toContain('const canvas=document.querySelector("#pong")');
+  expect(source).toContain("running:false");
+  expect(source).toContain('event.key==="ArrowUp"||event.key==="ArrowDown"');
+  expect(source).toContain('if(event.code==="Space")');
+  expect(source).toContain('event.key==="r"||event.key==="R"');
+  expect(source).toContain('event.pointerType==="touch"');
+  expect(source).toContain('event.clientY<rect.top+rect.height/2?-1:1');
   expect(source).toContain('document.querySelector("#restart").onclick=restart');
   expect(source).toContain('canvas.addEventListener("pointermove"');
-  expect(source).toContain('keys.has("ArrowUp")');
+  expect(source).toContain("touch-action:none");
   expect(source).not.toMatch(/lightning|invoice|donat|payment|settlement|unlock|walletofsatoshi|fetch\(/i);
 });
 

@@ -27,6 +27,19 @@ const ACCESS_KEY = /^[A-Za-z0-9_-]{6,256}$/;
 const DEPOSIT_STATES = new Set(['UNPAID', 'PAID', 'ISSUED', 'EXPIRED']);
 const PAYMENT_STATES = new Set(['UNPAID', 'PENDING', 'PAID']);
 const LIGHTNING_ADDRESS = /^[A-Za-z0-9.!#$%&'*+\/=?^_`{|}~-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
+const INSUFFICIENT_MELT_BALANCE = /^Insufficient balance for melt: \d+ < \d+$/;
+const INSUFFICIENT_BALANCE_MESSAGE = 'Not enough balance to cover the payment and Lightning fee. Add a few sats or send a smaller amount.';
+
+function recognizedPaymentError(path: string, method: 'GET' | 'POST', status: number, body: string) {
+  if (path !== '/v1/wallet/pay' || method !== 'POST' || status !== 400) return null;
+  let parsed: any;
+  try { parsed = JSON.parse(body); } catch { return null; }
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') return null;
+  const error = parsed.error;
+  if (error && !Array.isArray(error) && typeof error === 'object' && error.statusCode === 400 && error.name === 'VALIDATION_ERROR'
+    && typeof error.message === 'string' && INSUFFICIENT_MELT_BALANCE.test(error.message)) return INSUFFICIENT_BALANCE_MESSAGE;
+  return null;
+}
 
 export function ipponBaseUrl(value = DEFAULT_BASE) {
   let url: URL;
@@ -205,14 +218,17 @@ export class IpponCapability {
         if (bytes > MAX_RESPONSE_BYTES) { await reader.cancel(); throw new HttpError(502, 'Wallet service response exceeded the safe size limit'); }
         chunks.push(next.value);
       }
+      const responseBody = Buffer.concat(chunks).toString('utf8');
       if (!response.ok) {
         if (response.status === 404) throw new HttpError(404, 'Wallet record was not found');
         if (response.status === 401 || response.status === 403) throw new HttpError(502, 'Wallet authorization was rejected; disconnect it and connect a new wallet');
         if (response.status === 429) throw new HttpError(503, 'Wallet service is busy; retry shortly');
+        const recognized = recognizedPaymentError(path, method, response.status, responseBody);
+        if (recognized) throw new HttpError(400, recognized);
         throw new HttpError(502, response.status >= 500 ? 'Wallet service is unavailable; retry later' : 'Wallet service rejected the request');
       }
       let parsed: any;
-      try { parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+      try { parsed = JSON.parse(responseBody); }
       catch { throw new HttpError(502, 'Wallet service returned malformed JSON'); }
       demand(parsed && !Array.isArray(parsed) && typeof parsed === 'object', 502, 'Wallet service returned malformed JSON');
       return parsed;

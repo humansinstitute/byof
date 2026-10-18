@@ -7,15 +7,15 @@ const evidence = "tmp/docs/handoffs/starter-catalogue-browser";
 mkdirSync(evidence, { recursive: true });
 let app: ReturnType<typeof application>;
 const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: request => app.handle(request) });
-const accessKey="acceptance-secret",quote="quote_acceptance",invoice="lnbc1"+"q".repeat(40),paymentQuote="payment_acceptance";let balance=100,paymentChecks=0;const upstreamCalls:{path:string;method:string;body:any}[]=[];
+const accessKey="acceptance-secret",quote="quote_acceptance",invoice="lnbc1"+"q".repeat(40),paymentQuote="payment_acceptance";let balance=0,paymentChecks=0,depositAmount=0;const upstreamCalls:{path:string;method:string;body:any}[]=[];
 const ipponFetch=async(input:string|URL|Request,init:RequestInit={})=>{
   const url=new URL(String(input)),authorized=new Headers(init.headers).get("authorization")===`Bearer ${accessKey}`;
   upstreamCalls.push({path:url.pathname,method:String(init.method),body:init.body?JSON.parse(String(init.body)):null});
-  if(url.pathname==="/v1/wallet"&&init.method==="POST")return Response.json({name:"Acceptance",access_key:accessKey,mint:"https://mint.example",unit:"sat",balance:0,pending_balance:0,limits:null});
+  if(url.pathname==="/v1/wallet"&&init.method==="POST"){balance=0;depositAmount=0;return Response.json({name:"Acceptance",access_key:accessKey,mint:"https://mint.example",unit:"sat",balance:0,pending_balance:0,limits:null});}
   if(!authorized)return Response.json({error:"denied"},{status:401});
   if(url.pathname==="/v1/wallet"&&init.method==="GET")return Response.json({name:"Acceptance",access_key:accessKey,mint:"https://mint.example",unit:"sat",balance,pending_balance:0,limits:null});
-  if(url.pathname==="/v1/wallet/deposit"&&init.method==="POST")return Response.json({quote,request:invoice,state:"UNPAID",expiry:null});
-  if(url.pathname===`/v1/wallet/deposit/${quote}`&&init.method==="GET"){balance+=21;return Response.json({quote,request:invoice,state:"ISSUED",expiry:123456});}
+  if(url.pathname==="/v1/wallet/deposit"&&init.method==="POST"){depositAmount=JSON.parse(String(init.body)).amount;return Response.json({quote,request:invoice,state:"UNPAID",expiry:null});}
+  if(url.pathname===`/v1/wallet/deposit/${quote}`&&init.method==="GET"){balance+=depositAmount;depositAmount=0;return Response.json({quote,request:invoice,state:"ISSUED",expiry:123456});}
   if(url.pathname==="/v1/wallet/pay"&&init.method==="POST"){balance-=23;return Response.json({quote:paymentQuote,amount:init.body?JSON.parse(String(init.body)).amount:0,fee_reserve:2,state:"PENDING",payment_preimage:null,expiry:123456});}
   if(url.pathname===`/v1/wallet/pay/${paymentQuote}`&&init.method==="GET"){paymentChecks++;return Response.json({quote:paymentQuote,amount:21,fee_reserve:2,state:"PAID",payment_preimage:"acceptance-preimage",expiry:123456});}
   return Response.json({error:"missing"},{status:404});
@@ -34,7 +34,7 @@ const results: Record<string, unknown>[] = [];
 
 async function openStarter(width: number, height: number, index: number) {
   const starter = starters[index]!;
-  const context = await browser.newContext({ viewport: { width, height }, permissions: ["clipboard-read", "clipboard-write"] });
+  const context = await browser.newContext({ viewport: { width, height }, hasTouch: width === 390, isMobile: width === 390, permissions: ["clipboard-read", "clipboard-write"] });
   const page = await context.newPage();
   let copied="";await page.exposeFunction("captureWalletClipboard",(value:string)=>{copied=value});await page.addInitScript(()=>Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText:(value:string)=>(window as any).captureWalletClipboard(value)}}));
   const errors: string[] = [];
@@ -64,8 +64,9 @@ async function openStarter(width: number, height: number, index: number) {
     await frame.getByRole("button",{name:"COPY"}).click();expect(copied).toBe(invoice);
     await frame.getByRole("button",{name:"CHECK PAYMENT"}).first().click(); await expect(frame.getByRole("status")).toContainText("WALLET READY");
     await frame.getByRole("button",{name:"ADDRESS BOOK"}).click();await expect(frame.getByText("bitcoinbushbash@walletofsatoshi.com",{exact:true})).toBeVisible();await frame.locator(".contact-pick").filter({hasText:"Bitcoin Bush Bash"}).click();
-    await expect(frame.locator("#destination")).toHaveValue("bitcoinbushbash@walletofsatoshi.com");await frame.getByRole("button",{name:"REVIEW PAYMENT"}).evaluate((element:HTMLButtonElement)=>element.click());await expect(frame.locator("#reviewAmount")).toHaveText("21 sat");
     const payCalls=()=>upstreamCalls.filter(call=>call.path==="/v1/wallet/pay"&&call.method==="POST").length,payBaseline=payCalls();
+    await expect(frame.locator("#destination")).toHaveValue("bitcoinbushbash@walletofsatoshi.com");await frame.locator("#sendAmount").fill("42");await frame.getByRole("button",{name:"REVIEW PAYMENT"}).evaluate((element:HTMLButtonElement)=>element.click());await expect(frame.getByRole("status")).toContainText("Leave a few sats for the Lightning fee");await expect(frame.locator("#paymentReview")).toHaveClass(/hidden/);expect(payCalls()).toBe(payBaseline);await expect(page.locator(".napplet-consent")).toHaveCount(0);
+    await frame.locator("#sendAmount").fill("21");await frame.getByRole("button",{name:"REVIEW PAYMENT"}).evaluate((element:HTMLButtonElement)=>element.click());await expect(frame.locator("#reviewAmount")).toHaveText("21 sat");
     await frame.getByRole("button",{name:"CONTINUE TO APPROVAL"}).evaluate((element:HTMLButtonElement)=>element.click());const consent=page.locator(".napplet-consent");await expect(consent).toContainText("SATCADE wallet");await expect(consent).toContainText("v1");await expect(consent).toContainText("bitcoinbushbash@walletofsatoshi.com");await expect(consent).toContainText("Amount: 21 sat");await expect(consent).toContainText("Wallet funds will leave");await expect(consent.locator('[data-napplet-consent="deny"]')).toBeFocused();
     const concurrent=frame.locator("body").evaluate(async()=>{try{await(window as any).napplet.cashu.pay({lightningAddress:"other@example.com",amount:1});return"OK"}catch(error:any){return error.code}});expect(await concurrent).toBe("BUSY");await consent.locator('[data-napplet-consent="deny"]').click();await expect(frame.getByRole("status")).toContainText("NO FUNDS SENT");expect(payCalls()).toBe(payBaseline);
     await frame.getByRole("button",{name:"CONTINUE TO APPROVAL"}).evaluate((element:HTMLButtonElement)=>element.click());await expect(consent).toContainText("bitcoinbushbash@walletofsatoshi.com");await consent.locator('[data-napplet-consent="allow"]').click();await expect(frame.locator("#paymentState")).toContainText("PENDING");expect(payCalls()).toBe(payBaseline+1);await frame.locator("#paymentResult").getByRole("button",{name:"CHECK PAYMENT"}).evaluate((element:HTMLButtonElement)=>element.click());await expect(frame.locator("#paymentState")).toContainText("PAID");expect(paymentChecks).toBeGreaterThan(0);
@@ -86,11 +87,19 @@ async function openStarter(width: number, height: number, index: number) {
   } else {
     await expect(frame.locator("#pong")).toBeVisible();
     const text=(await frame.locator("body").innerText()).toLowerCase();expect(text).not.toMatch(/lightning|invoice|donat|payment|unlock/);
-    await frame.locator("#pong").press("ArrowUp");
-    await frame.getByRole("button",{name:"Pause"}).click();await expect(frame.getByRole("status")).toContainText("Paused");
-    await frame.getByRole("button",{name:"Resume"}).click();await expect(frame.getByRole("status")).toContainText("Game running");
-    expect(await frame.locator("#pong").evaluate(()=>eval("state.x=-10;frame();true"))).toBe(true);await expect(frame.getByRole("status")).toContainText("Score 0–1",{timeout:3000});
-    await frame.getByRole("button",{name:"Restart scores"}).click();await expect(frame.getByRole("status")).toContainText("Score 0–0");
+    await expect(frame.getByRole("status")).toContainText("Ready. Press Space or Start. Score 0–0.");
+    const initial=await frame.locator("#pong").evaluate(()=>eval("({x:state.x,left:state.left,running:state.running})"));await page.waitForTimeout(150);const still=await frame.locator("#pong").evaluate(()=>eval("({x:state.x,left:state.left,running:state.running})"));expect(still).toEqual(initial);
+    if(width===390){
+      const canvas=frame.locator("#pong");await canvas.scrollIntoViewIfNeeded();const box=await canvas.boundingBox();expect(box).not.toBeNull();const scrollBefore=await page.evaluate(()=>scrollY);
+      await page.touchscreen.tap(box!.x+box!.width/2,box!.y+box!.height/4);expect(await canvas.evaluate(()=>eval("state.left"))).toBeLessThan(initial.left);
+      await page.touchscreen.tap(box!.x+box!.width/2,box!.y+box!.height*3/4);expect(await canvas.evaluate(()=>eval("state.left"))).toBe(initial.left);expect(await page.evaluate(()=>scrollY)).toBe(scrollBefore);
+    }else{
+      const canvas=frame.locator("#pong");await canvas.press("ArrowUp");const movedUp=await canvas.evaluate(()=>eval("state.left"));expect(movedUp).toBeLessThan(initial.left);await canvas.press("ArrowDown");expect(await canvas.evaluate(()=>eval("state.left"))).toBe(initial.left);
+    }
+    const canvas=frame.locator("#pong");await canvas.press("Space");await expect(frame.getByRole("status")).toContainText("Game running");const runningX=await canvas.evaluate(()=>eval("state.x"));await page.waitForTimeout(100);expect(await canvas.evaluate(()=>eval("state.x"))).not.toBe(runningX);
+    await canvas.press("Space");await expect(frame.getByRole("status")).toContainText("Paused");const pausedX=await canvas.evaluate(()=>eval("state.x"));await page.waitForTimeout(100);expect(await canvas.evaluate(()=>eval("state.x"))).toBe(pausedX);
+    await canvas.press("Space");await expect(frame.getByRole("status")).toContainText("Game running");expect(await canvas.evaluate(()=>eval("state.running"))).toBe(true);
+    await canvas.evaluate(()=>eval("state.leftScore=3;state.rightScore=4;state.left=0;state.x=10"));await canvas.press("r");await expect(frame.getByRole("status")).toContainText("Reset. Game running. Score 0–0.");expect(await canvas.evaluate(()=>eval("({leftScore:state.leftScore,rightScore:state.rightScore,left:state.left,running:state.running})"))).toEqual({leftScore:0,rightScore:0,left:140,running:true});
   }
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
