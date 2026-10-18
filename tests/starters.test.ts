@@ -44,9 +44,20 @@ test("Nostr browser uses the trusted relay API, exact filter, bounded rendering 
 test("spinner always resolves Yes and dice creates exactly 100 unbiased bounded D6 values", () => {
   const spin = byId("spinner").source, dice = byId("dice").source;
   expect(spin).toContain("Should I buy bitcoin?");
+  expect(spin.match(/>YES</g)).toHaveLength(2);
+  expect(spin.match(/>NO</g)).toHaveLength(2);
+  expect(spin).toContain('class="pointer"');
+  expect(spin).toContain("position:absolute;z-index:2");
+  expect(spin).toContain("FULL_TURNS=5,YES_SECTOR_OFFSET_DEG=90");
+  expect(spin).toContain("YES_LANDING_DEG=FULL_TURNS*360+YES_SECTOR_OFFSET_DEG");
+  expect(spin).toContain('wheel.style.setProperty("--landing-angle",YES_LANDING_DEG+"deg")');
+  expect(spin).toContain("rotate(var(--landing-angle))");
+  expect(spin).toContain("@keyframes counterSpin");
   expect(spin).toContain('answer.textContent="Yes"');
   expect(spin).toContain("@keyframes spin");
-  expect(spin).not.toMatch(/No|Maybe/);
+  expect(spin).toContain("prefers-reduced-motion: reduce");
+  expect(spin).not.toContain('answer.textContent="No"');
+  expect(spin).not.toMatch(/Math\.random/);
   expect(dice).toContain("crypto.getRandomValues(bytes)");
   expect(dice).toContain("bytes[0]>=252");
   expect(dice).toContain("bytes[0]%6+1");
