@@ -37,12 +37,12 @@ test('direct admin creation pins signer/app/Tower and intent; retries do not cre
 });
 test('selection automatically registers app, grants guest, starts one scoped job; readiness waits for verified signed delivery; existing targets fenced',async()=>{
  const f=fixture(),saved=globalThis.fetch;try{
- const workspaceId=crypto.randomUUID(),owner=nip19.npubEncode(f.member.pubkey),entry={label:'Workspace',identity:{workspace_id:workspaceId,workspace_owner_npub:owner}},requests:string[]=[],runId=crypto.randomUUID();let failRegistration=true;
+ const workspaceId=crypto.randomUUID(),owner=nip19.npubEncode(f.member.pubkey),entry={label:'Workspace',identity:{workspace_id:workspaceId,workspace_owner_npub:owner}},requests:string[]=[],pipelinePaths:string[]=[],runId=crypto.randomUUID();let failRegistration=true;
  globalThis.fetch=(async(url:any,init:any)=>{
   requests.push(url);const proof=datasetProof(String(url));if(proof)return proof;if(url.endsWith('/workspaces'))return Response.json({workspaces:[entry]});
   if(url.endsWith('/apps'))return failRegistration?Response.json({error:'denied'},{status:403}):Response.json({});
   if(url.endsWith('/invites'))return Response.json({identity:{workspace_owner_npub:owner}});
-  expect(url).toBe(f.template.pipeline.brokerUrl);const request=JSON.parse(init.body),bodyHash=sha256(request.serializedBody),signedUrl=f.template.pipeline.origin+request.path,event=finalizeEvent({kind:27235,created_at:Math.floor(Date.now()/1000),content:'',tags:[['u',signedUrl],['method',request.method],['payload',bodyHash]]},f.appKey);
+  expect(url).toBe(f.template.pipeline.brokerUrl);const request=JSON.parse(init.body);pipelinePaths.push(request.path);const bodyHash=sha256(request.serializedBody),signedUrl=f.template.pipeline.origin+request.path,event=finalizeEvent({kind:27235,created_at:Math.floor(Date.now()/1000),content:'',tags:[['u',signedUrl],['method',request.method],['payload',bodyHash]]},f.appKey);
   return Response.json({response:{runId},httpStatus:200,receipt:{url:signedUrl,method:request.method,bodyHash,event}});
  }) as any;
  await f.connect.connect(f.member,f.tower.id,f.workshop.id,{event:f.sign(towerOrigin+'/api/v4/flightdeck-pg/workspaces','GET')});
@@ -57,10 +57,14 @@ test('selection automatically registers app, grants guest, starts one scoped job
  storeStorageDelivery(w,cfg,{eventId:crypto.randomUUID(),bodyHash:'verified-delivery',attempt:1,envelope:{deliveryId:crypto.randomUUID(),runId,terminal:true,status:'ok',error:null,result:{jobId:job.id,remoteStorage:artifact}}});expect(storageStatus(w,cfg).binding.status).toBe('ready');
  f.app.db.run('UPDATE storage_jobs SET run_id=NULL WHERE id=?',[job.id]);await f.connect.bind(f.member,f.tower.id,f.workshop.id,body);expect(f.app.db.query('SELECT * FROM storage_jobs').all()).toHaveLength(1);expect(requests.filter(x=>x.endsWith('/invites'))).toHaveLength(2);
  const other=crypto.randomUUID();f.app.db.run('UPDATE storage_connections SET workspaces_json=? WHERE actor=?',[JSON.stringify([entry,{identity:{workspace_id:other,workspace_owner_npub:owner}}]),f.member.pubkey]);await expect(f.connect.bind(f.member,f.tower.id,f.workshop.id,{...body,workspaceId:other})).rejects.toThrow('already bound');
- const second=f.app.site.create(f.member,{title:'Second',towerId:f.tower.id})!;expect(f.app.site.storage(second.id)?.workshopId).toBe(second.id);expect(f.app.site.storage(second.id)?.pipeline).toEqual(cfg.pipeline);f.config.storageTemplates[0]={...f.template,pipeline:{...f.template.pipeline,definitionId:'newer-connector'}};expect(f.app.site.storage(second.id)?.pipeline.definitionId).toBe(cfg.pipeline.definitionId);expect(target.workspaceId).toBe(workspaceId);
+ const second=f.app.site.create(f.member,{title:'Second',towerId:f.tower.id})!;expect(f.app.site.storage(second.id)?.workshopId).toBe(second.id);expect(f.app.site.storage(second.id)?.pipeline).toEqual(cfg.pipeline);
+ const pinned=JSON.parse((f.app.db.query('SELECT config_json FROM managed_workshop_storage WHERE workshop_id=?').get(second.id) as any).config_json);
+ f.config.storageTemplates[0]={...f.template,pipeline:{...f.template.pipeline,definitionId:'user:owner:newer-connector'}};
+ const upgraded=f.app.site.storage(second.id)!;expect(upgraded.pipeline.definitionId).toBe('user:owner:newer-connector');expect(upgraded.workshopId).toBe(second.id);expect(upgraded.towerOrigin).toBe(pinned.towerOrigin);expect(upgraded.appNpub).toBe(pinned.appNpub);expect(upgraded.localRoot).toBe(pinned.localRoot);
+ expect(JSON.parse((f.app.db.query('SELECT config_json FROM managed_workshop_storage WHERE workshop_id=?').get(second.id) as any).config_json)).toEqual(pinned);expect(target.workspaceId).toBe(workspaceId);
  const beforeGrants=requests.filter(x=>x.endsWith('/invites')||x.endsWith('/apps')).length;failRegistration=true;
  await f.connect.connect(f.member,f.tower.id,second.id,{event:f.sign(towerOrigin+'/api/v4/flightdeck-pg/workspaces','GET')});
- const secondState=await f.connect.bind(f.member,f.tower.id,second.id,body);expect(secondState.binding.status).toBe('probing');expect(f.app.db.query('SELECT * FROM storage_jobs').all()).toHaveLength(2);
+ const secondState=await f.connect.bind(f.member,f.tower.id,second.id,body);expect(secondState.binding.status).toBe('probing');expect(f.app.db.query('SELECT * FROM storage_jobs').all()).toHaveLength(2);expect(pipelinePaths.at(-1)).toBe('/api/pipelines/definitions/user%3Aowner%3Anewer-connector/runs');
  expect(requests.filter(x=>x.endsWith('/invites')||x.endsWith('/apps')).length).toBe(beforeGrants);expect(secondState.namespaceReady).toBe(false);
 
  expect(()=>f.app.site.storage(crypto.randomUUID())).not.toThrow();

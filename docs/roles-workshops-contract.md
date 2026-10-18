@@ -133,9 +133,13 @@ explicit migration before a binding can move.
 `FREEDOM_STORAGE_TEMPLATES` supplies an operator-approved managed connector for
 each exact Tower origin. Additional workshops on that Tower automatically save
 an installation configuration in `managed_workshop_storage`; configuration
-includes only public identity and server-local credential file paths, never key
-or bearer values. Saved connector definitions remain pinned when a template is
-upgraded. Existing jobs, pipelines, grants and targets are retained.
+includes only public identity and server-local credential references, never key
+or bearer values. The saved installation, Tower, app identity, local root and
+workspace destination remain pinned. Pipeline execution authority resolves from
+the installation's current template so an immutable definition/grant rotation
+cannot leave existing workshops submitting an old definition with a new grant.
+The saved row is not rewritten during resolution. Existing definitions, grants,
+jobs and targets are retained.
 
 Install the template once with `scripts/storage-install.ts` using an ignored
 `ManagedStorageScope` with `installationWorkshops: true`, register its immutable

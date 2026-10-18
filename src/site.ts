@@ -5,6 +5,7 @@ import { type Member, now } from './auth.ts';
 import { demand, text } from './errors.ts';
 import { defaultBuilderPrompt, defaultAgentName, migrateNappletPrompt } from './builder-prompt.ts';
 import { verifyForwarded, type StorageConfig } from './storage.ts';
+import { currentManagedStorageConfig } from './managed-storage-config.ts';
 const canvasPreviewKinds = new Set(['text', 'image', 'group', 'arrow']);
 function finiteGeometry(value: any) {
     return value && ['x', 'y', 'width', 'height'].every(key => typeof value[key] === 'number' && Number.isFinite(value[key]));
@@ -213,6 +214,6 @@ export class Site {
         const configured=this.db.query('SELECT tower_id,config_json FROM managed_workshop_storage WHERE workshop_id=?').get(workshopId) as any;
         demand(configured.tower_id===w.tower_id,409,'Workshop storage Tower is already configured; migrate before changing it');
         const stored=JSON.parse(configured.config_json);
-        demand(stored.workshopId===workshopId&&stored.towerOrigin===tower.origin&&stored.installationId===template.installationId&&stored.appNpub===template.appNpub,409,'Workshop installation authority changed');
-        return stored; }
+        try{return currentManagedStorageConfig(stored,template,workshopId);}
+        catch{demand(false,409,'Workshop installation authority changed');} }
 }
