@@ -42,6 +42,18 @@ test('concurrent dispatches and replay after restart return one run from immutab
     expect(followupAvailable({...f.project,id:'another'},f.config)).toBe(false);
   } finally {f.close();}
 });
+test('Napplet deletion wins a dispatch acceptance race without reviving the cancelled request', async () => {
+  const f=fixture();try {
+    f.save('request');let release!:(value:any)=>void;
+    const pending=dispatchFollowup(f.app.workshop,f.member,f.project.id,'request',f.config,async()=>await new Promise<any>(resolve=>release=resolve));
+    await Promise.resolve();
+    f.app.workshop.deleteNapplet({...f.member,admin:true,host:true},f.project.id,{confirmPermanent:true,confirmTitle:f.project.title,expectedRevisionId:f.project.current_revision});
+    release({runId:'late-run',receipt:{accepted:true}});
+    const row:any=await pending;
+    expect(row.status).toBe('cancelled');expect(row.run_id).toBeNull();
+    expect(f.app.db.query('SELECT count(*) n FROM activity_turns WHERE run_id=?').get('late-run')).toEqual({n:0});
+  } finally {f.close();}
+});
 test('uncertain acceptance retries the same ID and payload, including after process loss', async () => {
   const f=fixture();try {
     f.save('request');const payloads:any[]=[];

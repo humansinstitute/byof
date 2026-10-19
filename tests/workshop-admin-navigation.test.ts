@@ -28,11 +28,14 @@ test('Napplet edit affordances distinguish administrators from ordinary nonowner
   expect(card).toContain("control(canEdit ? 'napplet-settings' : 'napplet-options'");
   const actions=source.match(/if \(action === 'napplet-settings' \|\| action === 'napplet-options'\) \{[\s\S]*?\n    \}/)?.[0]||'';
   expect(actions).toContain('canEdit=owner||me.host');
-  expect(actions).toContain("owner?'Edit your Napplet!':'Edit Napplet as administrator'");
+  expect(actions).toContain("button('edit-napplet','Edit Napplet',id)");
   expect(actions).toContain("if (action === 'napplet-settings' && !canEdit)");
   expect(source).toContain("canEdit=detail.permissions?.edit??own");
-  expect(source).toContain("own ? 'Your project' : 'Administrator editing'");
-  expect(source).toContain('Administrative changes are recorded under your account. Public publication consent remains with the Napplet owner.');
+  expect(source).toContain('Napplet project · Canvas v');
+  expect(source).not.toContain('Administrator editing');
+  expect(source).not.toContain('Host follow-up instruction');
+  expect(source).not.toContain('Reason for acting on this project');
+  expect(source).not.toContain('Send host follow-up');
 });
 
 test('site-admin Napplet deletion is deliberately confirmed and only refreshes after server success',()=>{

@@ -263,10 +263,10 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport?:(s
       if (hostFollowup && method === 'POST') {
         workshop.host(member);
         const projectId = hostFollowup[1]!, project = workshop.project(member,projectId);
-        demand(followupAvailable(project,config.followup)&&runtimeAvailable(config.followup,loadBuilderEngine(db,workshop.id).runtime),403,'Host execution is not activated for this owner and project');
-
-        const saved = workshop.request(member,projectId,body,true,true) as any;
-        return json({request:await dispatchFollowup(workshop,member,projectId,saved.id,config.followup),hostSubmitted:true},202);
+        const available=followupAvailable(project,config.followup)&&runtimeAvailable(config.followup,loadBuilderEngine(db,workshop.id).runtime);
+        let saved = workshop.request(member,projectId,body,available,true) as any;
+        if(available)saved=await dispatchFollowup(workshop,member,projectId,saved.id,config.followup);
+        return json({request:saved,generationAvailable:available,hostSubmitted:true},available?202:200);
       }
       const nativeLifecycle = path.match(/^\/api\/v1\/projects\/([^/]+)\/builder\/native$/);
       if(nativeLifecycle && method === 'POST') return json(await deleteNativeBuilder(workshop,member,nativeLifecycle[1]!,body,config.followup),202);
@@ -300,7 +300,7 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport?:(s
       const project = path.match(/^\/api\/v1\/projects\/([^/]+)(?:\/(activate|restore|share|consent|requests|preview|payload|runtime|rename|edit))?$/);
       if (project) {
         const [, id, action] = project;
-        if (!action && method === 'DELETE') return json(workshop.deleteNapplet(member,id!,body));
+        if (!action && method === 'DELETE') {const result=workshop.deleteNapplet(member,id!,body);nappletData.revokeProject(workshop.id,id!);return json(result);}
         if (!action && method === "GET") return json({ ...workshop.detail(member, id!), execution: executionLinks(workshop,member,id!,config.followup), nativeDeletionAvailable: !!config.followup?.nativeDeletion && !config.followup.suspended && followupAvailable(workshop.project(member,id!),config.followup), generationAvailable: followupAvailable(workshop.project(member,id!),config.followup)&&runtimeAvailable(config.followup,loadBuilderEngine(db,workshop.id).runtime), storageReady:workshop.storageReady, generationReason: !runtimeAvailable(config.followup,loadBuilderEngine(db,workshop.id).runtime)?'The selected builder engine awaits platform activation; your request and app remain saved.':!workshop.storageReady ? 'Private storage needs authorization. Questions are available; app changes wait for the site administrator to connect storage.' : config.followup?.suspended && id === config.followup.projectId ? "This project conversation is awaiting native resume activation. Requests are saved without execution." : null });
         if (action === "edit" && method === "GET") {
           workshop.editableProject(member,id!);
@@ -392,6 +392,6 @@ export function application(rootConfig: Config, fixtures?: {datasetTransport?:(s
     try {const capable=workshopBuilders(rootConfig.followup);await recoverWorkshopBuilders(new Workshop(db,workshop.assets),auth,capable,undefined,{storageReady:id=>{const w=new Workshop(db,workshop.assets,id),storage=site.storage(id);return !(w.roomRow().tower_id||storage)||!!storage&&storageStatus(w,storage).state==='ready';},storageRequired:id=>{const storage=site.storage(id);return !!storage && storageStatus(new Workshop(db,workshop.assets,id),storage).binding?.status==='ready';}});await reconcileStaleBuildingRequests(new Workshop(db,workshop.assets),auth,capable);}
     finally {recovering=false;for(const listener of listeners){try{listener();}catch{}}}
   }
-  return { db, auth, workshop, site, publication, handle: handleAndNotify, originOf, recoverBuilders,
+  return { db, auth, workshop, site, publication, nappletData, handle: handleAndNotify, originOf, recoverBuilders,
     onChange(listener: () => void) { listeners.add(listener); return () => listeners.delete(listener); } };
 }

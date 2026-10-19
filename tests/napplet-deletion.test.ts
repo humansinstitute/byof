@@ -2,6 +2,8 @@ import {afterEach,beforeEach,expect,test} from 'bun:test';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {finalizeEvent,generateSecretKey,getPublicKey} from 'nostr-tools';
 import {application} from '../src/application.ts';
+import {storeDelivery} from '../src/delivery-store.ts';
+import {Workshop} from '../src/workshop.ts';
 
 const origin='https://napplet-delete.test';
 let app:ReturnType<typeof application>,dir:string,adminKey:Uint8Array;
@@ -55,7 +57,7 @@ test('successful deletion removes live access and local app data while retaining
   expect(JSON.parse(beforeBoard.objects_json).some((item:any)=>item.projectId===project.id)).toBe(true);
 
   const deleted=await call(`projects/${project.id}`,confirmation(project),admin,canvas.id,'DELETE');
-  expect(deleted.status).toBe(200);expect(deleted.data).toMatchObject({deletedNappletId:project.id,localDataDeleted:1,boardObjectRemoved:true,externalArtifactsRetained:true,nativeLifecycleUnchanged:true});
+  expect(deleted.status).toBe(200);expect(deleted.data).toMatchObject({deletedNappletId:project.id,localDataDeleted:1,boardObjectRemoved:true,externalArtifactsRetained:true,nativeLifecycleFenced:true});
   expect(app.db.query('SELECT hidden,shared_revision,deleted_by,deleted_at FROM projects WHERE id=?').get(project.id)).toMatchObject({hidden:1,shared_revision:null,deleted_by:admin.member.pubkey});
   expect(app.db.query('SELECT count(*) n FROM revisions WHERE project_id=?').get(project.id)).toEqual({n:1});
   expect(app.db.query('SELECT count(*) n FROM requests WHERE project_id=?').get(project.id)).toEqual({n:1});
@@ -65,7 +67,7 @@ test('successful deletion removes live access and local app data while retaining
   expect(app.db.query('SELECT state,operation_id FROM ippon_wallets WHERE project_id=?').get(project.id)).toEqual({state:'uncertain',operation_id:'retained-audit'});
   expect(app.db.query('SELECT excluded FROM hosted_publication_exclusions WHERE workshop_id=? AND project_id=?').get(canvas.id,project.id)).toEqual({excluded:1});
   const audit=app.db.query("SELECT actor,action,detail_json FROM project_admin_audit WHERE project_id=? AND action='delete'").get(project.id) as any;
-  expect(audit.actor).toBe(admin.member.pubkey);expect(JSON.parse(audit.detail_json)).toEqual({localDataDeleted:1,boardObjectRemoved:true,externalArtifactsRetained:true,nativeLifecycleUnchanged:true});
+  expect(audit.actor).toBe(admin.member.pubkey);expect(JSON.parse(audit.detail_json)).toEqual({localDataDeleted:1,boardObjectRemoved:true,externalArtifactsRetained:true,nativeLifecycleFenced:true,requestsCancelled:0,builderEpochsRetired:1,builderDeletionsCancelled:0,agentPublicationsCancelled:0,publicationClaimsFenced:0});
   expect(JSON.parse((app.db.query('SELECT objects_json FROM workshop_boards WHERE workshop_id=?').get(canvas.id) as any).objects_json).some((item:any)=>item.projectId===project.id)).toBe(false);
 
   expect((await call('room',undefined,owner,canvas.id)).data.board.napplets.some((item:any)=>item.id===project.id)).toBe(false);
@@ -76,18 +78,40 @@ test('successful deletion removes live access and local app data while retaining
   expect(app.db.query('PRAGMA foreign_key_check').all()).toEqual([]);
 });
 
-test('active, uncertain and in-flight native lifecycle states block deletion without partial changes',async()=>{
-  const {admin,canvas,project}=await fixture(),body=confirmation(project);
-  const requestId=crypto.randomUUID();
-  app.db.run("INSERT INTO requests(id,project_id,prompt,expected_revision,status,error,created_at,mode) VALUES(?,?,?,?, 'building',NULL,1,'auto')",[requestId,project.id,'active',project.current_revision]);
-  expect((await call(`projects/${project.id}`,body,admin,canvas.id,'DELETE')).status).toBe(409);
-  app.db.run("UPDATE requests SET status='failed' WHERE id=?",[requestId]);
+test('deletion is authoritative across every active or uncertain state and fences late callbacks and publication',async()=>{
+  const {admin,owner,canvas}=await fixture(),scoped=new Workshop(app.db,app.workshop.assets,canvas.id),member=scoped.scoped(app.auth.member(owner.member.pubkey));
+  for(const status of ['accepted','queued','dispatching','dispatch_pending','screening','building','storage_pending','execution_uncertain']){
+    const project=scoped.create(member,'spinner',undefined,true).project,requestId=crypto.randomUUID();
+    app.db.run('INSERT INTO requests(id,project_id,prompt,expected_revision,status,error,run_id,created_at,mode) VALUES(?,?,?,?,?,?,?,1,?)',[requestId,project.id,status,project.current_revision,status,null,'run-'+requestId,'auto']);
+    const deleted=await call(`projects/${project.id}`,confirmation(project),admin,canvas.id,'DELETE');
+    expect(deleted.status).toBe(200);expect(deleted.data.requestsCancelled).toBe(1);
+    expect(app.db.query('SELECT status FROM requests WHERE id=?').get(requestId)).toEqual({status:'cancelled'});
+  }
+
+  const project=scoped.create(member,'spinner',undefined,true).project,requestId=crypto.randomUUID(),runId='late-run-'+crypto.randomUUID();
+  app.db.run('INSERT INTO requests(id,project_id,prompt,expected_revision,status,error,run_id,created_at,mode) VALUES(?,?,?,?,?,?,?,1,?)',[requestId,project.id,'active',project.current_revision,'building',null,runId,'build']);
   app.db.run("UPDATE builder_epochs SET state='deleting',reason='fixture' WHERE project_id=? AND generation=0",[project.id]);
   app.db.run("INSERT INTO builder_deletions(id,project_id,generation,input_json,status) VALUES(?,?,0,'{}','dispatch_pending')",[crypto.randomUUID(),project.id]);
-  expect((await call(`projects/${project.id}`,body,admin,canvas.id,'DELETE')).status).toBe(409);
-  app.db.run("UPDATE builder_deletions SET status='completed' WHERE project_id=?",[project.id]);app.db.run("UPDATE builder_epochs SET state='retired' WHERE project_id=?",[project.id]);
-  const snapshotId=crypto.randomUUID();app.db.run('INSERT INTO publication_snapshots VALUES(?,?,?,?,?)',[snapshotId,admin.member.pubkey,JSON.stringify({workshopId:canvas.id,apps:[{projectId:project.id}]}),'publishing',1]);app.db.run('INSERT INTO publication_claims VALUES(?,?,?)',[snapshotId,crypto.randomUUID(),Date.now()+60_000]);
-  expect((await call(`projects/${project.id}`,body,admin,canvas.id,'DELETE')).status).toBe(409);
-  expect(app.db.query('SELECT deleted_at FROM projects WHERE id=?').get(project.id)).toEqual({deleted_at:null});
-  expect(app.db.query("SELECT count(*) n FROM project_admin_audit WHERE project_id=? AND action='delete'").get(project.id)).toEqual({n:0});
+  app.db.run("INSERT INTO agent_publications(request_id,run_id,candidate_json,status) VALUES(?,?,?,'pending')",[requestId,runId,'{}']);
+  const snapshotId=crypto.randomUUID();app.db.run('INSERT INTO publication_snapshots VALUES(?,?,?,?,?)',[snapshotId,admin.member.pubkey,JSON.stringify({workshopId:canvas.id,apps:[{projectId:project.id}]}),'publishing',1]);
+  app.db.run('INSERT INTO publication_claims VALUES(?,?,?)',[snapshotId,crypto.randomUUID(),Date.now()+60_000]);
+  app.db.run("INSERT INTO publication_operations VALUES(?,?,'pending',NULL,NULL,1)",[snapshotId,'asset:test']);
+  const documentId=app.nappletData.issueDocument(scoped,member,'session',project.id,project.current_revision);
+  const token=app.nappletData.open(scoped,member,'session',{projectId:project.id,revisionId:project.current_revision,documentId}).token;
+  expect(app.nappletData.activeToken(token)).toBe(true);
+
+  const deleted=await call(`projects/${project.id}`,confirmation(project),admin,canvas.id,'DELETE');
+  expect(deleted.status).toBe(200);expect(deleted.data).toMatchObject({requestsCancelled:1,builderEpochsRetired:1,builderDeletionsCancelled:1,agentPublicationsCancelled:1,publicationClaimsFenced:1,nativeLifecycleFenced:true});
+  expect(app.nappletData.activeToken(token)).toBe(false);
+  expect(app.db.query('SELECT state FROM builder_epochs WHERE project_id=? AND generation=0').get(project.id)).toEqual({state:'retired'});
+  expect(app.db.query('SELECT status FROM builder_deletions WHERE project_id=?').get(project.id)).toEqual({status:'cancelled'});
+  expect(app.db.query('SELECT status FROM agent_publications WHERE request_id=?').get(requestId)).toEqual({status:'cancelled'});
+  expect(app.db.query('SELECT expires_at FROM publication_claims WHERE snapshot_id=?').get(snapshotId)).toEqual({expires_at:0});
+  expect(app.db.query('SELECT status FROM publication_operations WHERE snapshot_id=?').get(snapshotId)).toEqual({status:'interrupted'});
+  expect(app.db.query('SELECT status FROM publication_snapshots WHERE id=?').get(snapshotId)).toEqual({status:'partial_failure'});
+
+  const late:any={eventId:crypto.randomUUID(),bodyHash:'late',attempt:1,envelope:{runId,deliveryId:crypto.randomUUID(),terminal:true,status:'ok',error:null,result:{action:'build_completed',requestId,projectId:project.id,banRequired:false}}};
+  expect(()=>storeDelivery(app.db,late,scoped)).toThrow('request_already_terminal');
+  expect(app.db.query('SELECT count(*) n FROM revisions WHERE project_id=?').get(project.id)).toEqual({n:1});
+  expect((await call(`projects/${project.id}`,confirmation(project),admin,canvas.id,'DELETE')).status).toBe(404);
 });

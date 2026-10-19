@@ -35,6 +35,10 @@ export class NappletData {
     return {token,expires,user:member.pubkey,identityType:member.identity_type,title:project.title,workshopTitle:workshop.roomRow().title,revisionNumber:revision.number};
   }
   activeToken(token:string){const b=this.bindings.get(token);if(b&&b.expires<=Date.now())this.closeToken(token);return !!b&&b.expires>Date.now();}
+  revokeProject(workshopId:string,projectId:string){
+    for(const [id,binding] of this.documents)if(binding.workshop===workshopId&&binding.project===projectId)this.documents.delete(id);
+    for(const [token,binding] of this.bindings)if(binding.workshop===workshopId&&binding.project===projectId)this.closeToken(token);
+  }
   authorize(workshop:Workshop,member:Member,sessionHash:string,token:string){
     const b=this.bindings.get(token);
     demand(b&&b.expires>Date.now()&&b.sessionHash===sessionHash&&b.user===member.pubkey&&b.workshop===workshop.id,403,'Bridge binding expired or mismatched');

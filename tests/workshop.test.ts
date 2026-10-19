@@ -172,30 +172,31 @@ test('builder guidance is host-only, bounded, concurrent-save protected and dura
   expect(()=>app.db.run('UPDATE request_builder_prompts SET text=? WHERE request_id=?',['tamper','snapshot'])).toThrow('immutable');
 });
 
-test('host follow-up is explicit, owner-scoped, audited and idempotent without replaying old requests',async()=>{
+test('administrator messages use the ordinary owner fields while preserving scope, attribution and idempotency',async()=>{
  const {host,a,b}=await setup(),d=await create(a),id=d.project.id;
  const cfg={projectId:id,ownerPubkey:a.member.pubkey,conversationKey:d.project.conversation_id,directory:'/fixed',brokerUrl:'http://127.0.0.1:1',credentialFile:'/missing',origin:'https://autopilot.test',definitionId:'owner-definition',callbackUrl:origin+'/api/v1/pipeline/callback',appPubkey:'c'.repeat(64),approvedRequestId:''};
  config.followup=cfg;
- const body={requestId:'host-one',prompt:'Build the authorized app',operatorReason:'Owner authorized this follow-up',expectedRevisionId:d.project.current_revision};
+ const body={requestId:'host-one',prompt:'Build the authorized app',expectedRevisionId:d.project.current_revision};
  expect((await call(`/api/v1/host/projects/${id}/requests`,body,b)).response.status).toBe(403);
  expect((await call(`/api/v1/projects/${id}/requests`,body,host)).response.status).toBe(404);
- expect((await call(`/api/v1/host/projects/${id}/requests`,{...body,operatorReason:''},host)).response.status).toBe(400);
+ expect((await call(`/api/v1/host/projects/${id}/requests`,{...body,operatorReason:'No reason field'},host)).response.status).toBe(400);
  const submitted=await call(`/api/v1/host/projects/${id}/requests`,body,host);
  expect(submitted.response.status).toBe(202);
  expect(submitted.data.hostSubmitted).toBe(true);
  const audit=app.db.query('SELECT * FROM host_request_audit WHERE request_id=?').get(body.requestId) as any;
- expect(audit.actor).toBe(host.member.pubkey);expect(audit.project_owner).toBe(a.member.pubkey);expect(audit.reason).toBe(body.operatorReason);
+ expect(audit.actor).toBe(host.member.pubkey);expect(audit.project_owner).toBe(a.member.pubkey);expect(audit.reason).toBe('administrator_message');
  expect((await call(`/api/v1/host/projects/${id}/requests`,body,host)).response.status).toBe(202);
- expect((await call(`/api/v1/host/projects/${id}/requests`,{...body,operatorReason:'different'},host)).response.status).toBe(409);
+ expect((await call(`/api/v1/host/projects/${id}/requests`,{...body,prompt:'different'},host)).response.status).toBe(409);
  expect(app.db.query('SELECT count(*) n FROM requests WHERE project_id=?').get(id)).toEqual({n:1});
  expect(app.workshop.detail(app.auth.member(a.member.pubkey),id).revisions).toHaveLength(1);
  expect(app.auth.member(a.member.pubkey).allowance).toBe(a.member.allowance);
  app.db.run("UPDATE requests SET status='succeeded' WHERE id=?",[body.requestId]);
  const ownBody={requestId:'original',prompt:'Original question',expectedRevisionId:d.project.current_revision};
  app.workshop.request(app.auth.member(a.member.pubkey),id,ownBody,false);
- expect((await call(`/api/v1/host/projects/${id}/requests`,{...ownBody,operatorReason:'try replay'},host)).response.status).toBe(409);
+ expect((await call(`/api/v1/host/projects/${id}/requests`,ownBody,host)).response.status).toBe(409);
  const other=await create(b);
- expect((await call(`/api/v1/host/projects/${other.project.id}/requests`,{...body,requestId:'foreign-scope',expectedRevisionId:other.project.current_revision},host)).response.status).toBe(403);
+ const unavailable=await call(`/api/v1/host/projects/${other.project.id}/requests`,{...body,requestId:'other-project',expectedRevisionId:other.project.current_revision},host);
+ expect(unavailable.response.status).toBe(200);expect(unavailable.data.generationAvailable).toBe(false);
  const detail=(await call(`/api/v1/projects/${id}`,undefined,host)).data;
  expect(detail.execution.definition).toBe('https://autopilot.test/pipelines/definitions/owner-definition');
 });

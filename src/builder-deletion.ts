@@ -32,8 +32,8 @@ export async function deleteNativeBuilder(workshop:Workshop,member:Member,projec
     db.run("UPDATE builder_deletions SET status='dispatching',claimed_at=?,error=NULL WHERE id=?",[now(),deletion.id]);
     return deletion;
   }).immediate();
-  if(entry)try{const accepted=await (submit??(input=>new ManagedPipelineClient(config!.nativeDeletion!).submit(input)))(JSON.parse(entry.input_json));db.run("UPDATE builder_deletions SET status='working',run_id=?,receipt_json=? WHERE id=? AND run_id IS NULL",[accepted.runId,JSON.stringify(accepted.receipt),entry.id]);}
-  catch{db.run("UPDATE builder_deletions SET status='dispatch_pending',error='Native deletion acceptance is uncertain. Retry this exact operation; builder requests remain fenced.' WHERE id=? AND run_id IS NULL",[entry.id]);}
+  if(entry)try{const accepted=await (submit??(input=>new ManagedPipelineClient(config!.nativeDeletion!).submit(input)))(JSON.parse(entry.input_json));db.run("UPDATE builder_deletions SET status='working',run_id=?,receipt_json=? WHERE id=? AND run_id IS NULL AND status='dispatching'",[accepted.runId,JSON.stringify(accepted.receipt),entry.id]);}
+  catch{db.run("UPDATE builder_deletions SET status='dispatch_pending',error='Native deletion acceptance is uncertain. Retry this exact operation; builder requests remain fenced.' WHERE id=? AND run_id IS NULL AND status='dispatching'",[entry.id]);}
   return db.query('SELECT id,generation,status,error,run_id,receipt_json FROM builder_deletions WHERE project_id=? AND generation=?').get(projectId,body.generation);
 }
 export function storeBuilderDeletion(workshop:Workshop,delivery:VerifiedDelivery):'applied'|'duplicate'|null{

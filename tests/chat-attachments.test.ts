@@ -41,9 +41,9 @@ test('request attachment snapshot is exact, linked in Markdown and materialized 
 });
 
 test('300 KB PNG follows prepare, private Tower upload/readback, poll and immutable builder request binding',async()=>{
-  const directory=mkdtempSync('/tmp/freedom-chat-storage-'),app=application({dataDir:directory,hostPubkey:null,origin:null,version:'test'}),appKey=generateSecretKey();
+  const directory=mkdtempSync('/tmp/freedom-chat-storage-'),admin='b'.repeat(64),app=application({dataDir:directory,hostPubkey:admin,origin:null,version:'test'}),appKey=generateSecretKey();
   try{
-    const owner='a'.repeat(64);app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,'Owner','temporary','admitted',20,1]);
+    const owner='a'.repeat(64);app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[owner,'Owner','temporary','admitted',20,1]);app.db.run('INSERT INTO members VALUES(?,?,?,?,?,?)',[admin,'Administrator','temporary','admitted',20,2]);
     const member=app.auth.member(owner),project=app.workshop.create(member,'spinner').project,bytes=Buffer.alloc(300_001,31),attachmentId=crypto.randomUUID(),objectId=crypto.randomUUID(),runId=crypto.randomUUID(),credential=directory+'/pipeline-capability';writeFileSync(credential,'a'.repeat(43),{mode:0o600});
     const target={towerUrl:'https://tower.example',workspaceId:crypto.randomUUID(),workspaceOwnerNpub:nip19.npubEncode(owner),appNpub:nip19.npubEncode(getPublicKey(appKey))};
     const pipeline:any={brokerUrl:'http://127.0.0.1/api/internal/wapps/pipelines',credentialFile:credential,origin:'https://autopilot.example',definitionId:'storage',callbackUrl:'https://byo.example/api/v1/storage/callback',appPubkey:getPublicKey(appKey)};
@@ -59,6 +59,7 @@ test('300 KB PNG follows prepare, private Tower upload/readback, poll and immuta
     updateStorageJob(app.workshop,config,row.id,{step:'preparing'});updateStorageJob(app.workshop,config,row.id,{step:'prepared',objectId});updateStorageJob(app.workshop,config,row.id,{step:'verified',artifact:storedResult.artifact,base64});
     storeStorageDelivery(app.workshop,config,{eventId:crypto.randomUUID(),bodyHash:'attachment-delivery',attempt:1,envelope:{deliveryId:crypto.randomUUID(),runId,terminal:true,status:'ok',error:null,result:{action:'attachment_completed',jobId:row.id,remoteStorage:storedResult.artifact}}});
     const ready:any=await chatAttachmentStatus(app.workshop,member,config,project.id,attachmentId);expect(ready).toMatchObject({status:'ready',storage_object_id:objectId,size_bytes:bytes.length,content_type:'image/png'});
+    const adminAttachment=crypto.randomUUID();expect((await prepareChatAttachment(app.workshop,app.auth.member(admin),config,project.id,{attachmentId:adminAttachment,filename:'admin.png',contentType:'image/png',sizeBytes:1,base64:'AA=='})).status).toBe('uploading');expect((await chatAttachmentStatus(app.workshop,app.auth.member(admin),pollingFailure,project.id,adminAttachment)).status).toBe('error');
     const prompt=`Use this screenshot ![screenshot.png](storage://${objectId})`,requestId=crypto.randomUUID(),payload={attachment_id:attachmentId,kind:'image',filename:'screenshot.png',content_type:'image/png',size_bytes:bytes.length,storage_object_id:objectId};
     app.workshop.request(member,project.id,{requestId,prompt,expectedRevisionId:project.current_revision,attachments:[payload]},false);const materialized=materializeRequestAttachments(app.workshop,requestId,directory+'/builder-project');expect(materialized[0]).toMatchObject({...payload,storage_ref:`storage://${objectId}`});expect(materialized[0].local_path).toContain(`/.attachments/${objectId}-screenshot.png`);expect(readFileSync(materialized[0].local_path)).toEqual(bytes);
     await expect(prepareChatAttachment(app.workshop,member,config,project.id,{attachmentId:crypto.randomUUID(),filename:'bad.svg',contentType:'image/svg+xml',sizeBytes:1,base64:'AA=='})).rejects.toThrow('PNG, JPEG, WebP or GIF');

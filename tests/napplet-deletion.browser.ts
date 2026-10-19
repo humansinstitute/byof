@@ -10,13 +10,13 @@ const source=await Bun.file('public/app.js').text(),bootstrap="try { const resul
 const fixtureSource=source.replace(bootstrap,`const fixtureOwner=location.origin.includes('owner');selectedWorkshop=${JSON.stringify(workshopId)};state=${JSON.stringify(room(false,true))};state.member=fixtureOwner?${JSON.stringify(member(true))}:${JSON.stringify(member(false))};setMember(state.member);csrf='fixture';screen='page';render();`);
 const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
 try{
-  let present=true,failOnce=true;const deleteCalls:any[]=[],errors:string[]=[];
+  let present=true;const deleteCalls:any[]=[],errors:string[]=[];
   const context=await browser.newContext();
   await context.route('**/*',async route=>{
     const request=route.request(),url=new URL(request.url()),isOwner=url.origin===ownerOrigin;
     if(url.pathname==='/'){await route.fulfill({contentType:'text/html',body:await Bun.file('public/index.html').text()});return;}
     if(url.pathname==='/app.js'){await route.fulfill({contentType:'application/javascript',body:fixtureSource});return;}
-    if(['/activity-time.js','/chat-attachments.js','/invitation-url.js','/napplet-host.js','/napplet-cache.js','/canvas-host.js','/identity.js'].includes(url.pathname)){await route.fulfill({contentType:'application/javascript',body:await Bun.file('public'+url.pathname).text()});return;}
+    if(['/activity-time.js','/chat-attachments.js','/invitation-url.js','/napplet-host.js','/napplet-cache.js','/canvas-host.js','/canvas-images.js','/identity.js'].includes(url.pathname)){await route.fulfill({contentType:'application/javascript',body:await Bun.file('public'+url.pathname).text()});return;}
     if(url.pathname==='/style.css'){await route.fulfill({contentType:'text/css',body:await Bun.file('public/style.css').text()});return;}
     if(url.pathname==='/api/v1/browser-origin'){await route.fulfill({json:{origin:url.origin}});return;}
     if(url.pathname==='/api/v1/room'&&request.method()==='GET'){await route.fulfill({json:room(isOwner,present)});return;}
@@ -24,8 +24,7 @@ try{
     if(url.pathname===`/api/v1/projects/${projectId}`&&request.method()==='DELETE'){
       deleteCalls.push(request.postDataJSON());expect(request.headers()['x-csrf-token']).toBe('fixture');
       if(isOwner){await route.fulfill({status:403,json:{error:'Site administrator access required'}});return;}
-      if(failOnce){failOnce=false;await route.fulfill({status:409,json:{error:'An active or uncertain build prevents deletion; reconcile it first'}});return;}
-      present=false;await route.fulfill({json:{deletedNappletId:projectId,externalArtifactsRetained:true,nativeLifecycleUnchanged:true}});return;
+      present=false;await route.fulfill({json:{deletedNappletId:projectId,externalArtifactsRetained:true,nativeLifecycleFenced:true,requestsCancelled:1}});return;
     }
     await route.fulfill({status:404,json:{error:'Fixture route not found'}});
   });
@@ -39,8 +38,7 @@ try{
   await page.getByRole('button',{name:'Cancel'}).click();await expect(dialog).not.toBeVisible();expect(deleteCalls).toEqual([]);
 
   await page.getByRole('button',{name:'Settings for Weather Desk'}).click();await page.getByRole('button',{name:'Delete Napplet'}).click();await confirmation.fill('Weather Desk');await submit.click();
-  await expect(dialog).toBeVisible();await expect(page.getByRole('alert')).toHaveText('An active or uncertain build prevents deletion; reconcile it first');await expect(page.getByRole('button',{name:'Settings for Weather Desk'})).toBeVisible();expect(deleteCalls).toHaveLength(1);
-  await submit.click();await expect(dialog).not.toBeVisible();await expect(page.getByRole('button',{name:'Settings for Weather Desk'})).toHaveCount(0);expect(deleteCalls).toHaveLength(2);
-  expect(deleteCalls[1]).toEqual({confirmTitle:'Weather Desk',confirmPermanent:true,expectedRevisionId:revisionId});expect(errors).toEqual([]);
+  await expect(dialog).not.toBeVisible();await expect(page.getByRole('button',{name:'Settings for Weather Desk'})).toHaveCount(0);expect(deleteCalls).toHaveLength(1);
+  expect(deleteCalls[0]).toEqual({confirmTitle:'Weather Desk',confirmPermanent:true,expectedRevisionId:revisionId});expect(errors).toEqual([]);
   await context.close();
 }finally{await browser.close();}

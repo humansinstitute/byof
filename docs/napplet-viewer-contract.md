@@ -98,9 +98,11 @@ consent remains owner-only and cannot be supplied by an administrator.
 Only a signed-in site administrator sees **Delete Napplet** in that settings
 dialog. The destructive form identifies the Napplet, requires its exact current
 title and revision, uses the normal CSRF-protected request path and does not
-remove the window until the server commits. Active/uncertain requests, native
-builder deletion and public publication claims fence deletion. The committed
-operation tombstones the project, removes its saved Canvas object and app-local
+remove the window until the server commits. The committed operation is the
+authoritative terminal action even when a request, native builder deletion or
+public publication claim is active or uncertain: it cancels or retires local
+work, expires relevant publication claims and fences every late callback. It
+tombstones the project, removes its saved Canvas object and app-local
 Napplet data, revokes consent and hosted inclusion, and closes all private,
 public-hosted and bridge access paths. Immutable revisions, request/guidance/
 engine history, fork lineage, wallet records and admin audit rows remain intact;

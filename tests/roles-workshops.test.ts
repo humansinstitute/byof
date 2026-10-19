@@ -235,7 +235,7 @@ test('member forks stay independent while workshop and site administrators can v
 
  config.followup={projectId:fork.project.id,ownerPubkey:forker.member.pubkey,conversationKey:fork.project.conversation_id,directory:'/fixed',builderRoot:dir+'/napplets',fileVersions:true,replacementEnabled:true,brokerUrl:'http://127.0.0.1:1',credentialFile:'/missing',origin:'https://autopilot.test',definitionId:'fork-admin-test',callbackUrl:origin+'/api/v1/pipeline/callback',appPubkey:'c'.repeat(64),approvedRequestId:''};
  for(const [administrator,requestId] of [[owner,'owner-admin-edit'],[admin,'site-admin-edit']] as const){
-   const response=await call(`host/projects/${fork.project.id}/requests`,{requestId,prompt:'Audited administrator change',operatorReason:'Administrator support requested',expectedRevisionId:fork.project.current_revision},administrator,w.id);
+   const response=await call(`host/projects/${fork.project.id}/requests`,{requestId,prompt:'Audited administrator change',expectedRevisionId:fork.project.current_revision},administrator,w.id);
    expect(response.status).toBe(202);expect(response.data.hostSubmitted).toBe(true);
    expect(app.db.query('SELECT actor,project_owner FROM host_request_audit WHERE request_id=?').get(requestId)).toEqual({actor:administrator.member.pubkey,project_owner:forker.member.pubkey});
    app.db.run("UPDATE requests SET status='succeeded' WHERE id=?",[requestId]);

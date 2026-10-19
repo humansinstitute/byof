@@ -17,6 +17,8 @@ export async function dispatchApprovedRequest(workshop: Workshop, member: Member
   const source = workshop.assets.get(workshop.revision(row.project_id, row.expected_revision).source_hash);
   const accepted = await client.submit({ requestId: id, projectId: row.project_id, prompt: row.prompt, source });
   workshop.db.transaction(() => {
+    const current=workshop.db.query("SELECT r.status,p.deleted_at FROM requests r JOIN projects p ON p.id=r.project_id WHERE r.id=?").get(id) as any;
+    demand(current && current.deleted_at===null && current.status==='unavailable',409,'Approved request was cancelled');
     bindRun(workshop.db, id, accepted.runId);
     workshop.db.run("UPDATE requests SET status='building',error=NULL WHERE id=? AND status='unavailable'", [id]);
     workshop.db.run("INSERT OR IGNORE INTO dispatch_receipts(request_id,run_id,receipt_json) VALUES(?,?,?)", [id, accepted.runId, JSON.stringify(accepted.receipt)]);

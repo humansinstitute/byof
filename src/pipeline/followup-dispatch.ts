@@ -64,6 +64,8 @@ async function prepareFollowup(workshop: Workshop, member: Member, projectId: st
     if (!submit) demand(dispatchConfig.definitionId && (dispatchConfig.credentialFile||dispatchConfig.credentialEnv),409,'Legacy dispatch requires its original managed grant');
     const accepted = await (submit ?? (input => new ManagedPipelineClient(dispatchConfig).submit(input)))(row.input);
     workshop.db.transaction(() => {
+      const current=workshop.db.query("SELECT r.status,p.deleted_at FROM requests r JOIN projects p ON p.id=r.project_id WHERE r.id=?").get(requestId) as any;
+      demand(current && current.deleted_at===null && ['dispatching','dispatch_pending'].includes(current.status),409,'Dispatch was cancelled');
       bindRun(workshop.db, requestId, accepted.runId);
       bindActivityAuthority(workshop.db,requestId,accepted.runId,row.input,dispatchConfig);
       workshop.db.run("UPDATE requests SET status='building',error=NULL WHERE id=? AND status IN ('dispatching','dispatch_pending')", [requestId]);
@@ -71,7 +73,7 @@ async function prepareFollowup(workshop: Workshop, member: Member, projectId: st
     }).immediate();
   } catch {
     // An uncertain HTTP outcome never gets a new request ID or a changed snapshot.
-    workshop.db.run("UPDATE requests SET status='dispatch_pending',error='Dispatch needs reconnection. Retry this saved request; it will use the same execution ID.' WHERE id=? AND run_id IS NULL", [requestId]);
+    workshop.db.run("UPDATE requests SET status='dispatch_pending',error='Dispatch needs reconnection. Retry this saved request; it will use the same execution ID.' WHERE id=? AND run_id IS NULL AND status IN ('dispatching','dispatch_pending')", [requestId]);
   }
   return workshop.db.query('SELECT * FROM requests WHERE id=?').get(requestId);
 }
@@ -124,14 +126,14 @@ export async function resumeFollowup(workshop: Workshop, member: Member, project
   try {
     const accepted = await client.submit(JSON.parse(recovery.input_json),recovery.execution_key);
     workshop.db.transaction(() => {
-      demand(workshop.db.run("UPDATE requests SET run_id=?,status='building',error=NULL WHERE id=? AND run_id=?",[accepted.runId,requestId,recovery.previous_run]).changes === 1,409,'Recovery run binding changed');
+      demand(workshop.db.run("UPDATE requests SET run_id=?,status='building',error=NULL WHERE id=? AND run_id=? AND status IN ('dispatching','dispatch_pending') AND EXISTS(SELECT 1 FROM projects p WHERE p.id=requests.project_id AND p.deleted_at IS NULL)",[accepted.runId,requestId,recovery.previous_run]).changes === 1,409,'Recovery run binding changed');
       bindActivityAuthority(workshop.db,requestId,accepted.runId,JSON.parse(recovery.input_json),config!);
       const previous=workshop.db.query('SELECT result_json FROM delivery_receipts WHERE request_id=? AND run_id=? ORDER BY created_at DESC LIMIT 1').get(requestId,recovery.previous_run) as any;
       bindActivityRecovery(workshop.db,accepted.runId,requestId,JSON.parse(recovery.input_json),previous?JSON.parse(previous.result_json).result?.turn:null);
       workshop.db.run('UPDATE request_recoveries SET new_run=?,receipt_json=? WHERE request_id=?',[accepted.runId,JSON.stringify(accepted.receipt),requestId]);
     }).immediate();
   } catch {
-    workshop.db.run("UPDATE requests SET status='dispatch_pending',error='Saved conversation recovery needs reconnection. Retry this same saved request.' WHERE id=? AND run_id=?",[requestId,recovery.previous_run]);
+    workshop.db.run("UPDATE requests SET status='dispatch_pending',error='Saved conversation recovery needs reconnection. Retry this same saved request.' WHERE id=? AND run_id=? AND status IN ('dispatching','dispatch_pending')",[requestId,recovery.previous_run]);
   }
   return workshop.db.query('SELECT * FROM requests WHERE id=?').get(requestId);
 }

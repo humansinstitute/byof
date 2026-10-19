@@ -29,7 +29,7 @@ function view(row:any,status:string,error:string|null=null){
 }
 
 export async function prepareChatAttachment(workshop:Workshop,member:Member,config:StorageConfig|undefined,projectId:string,body:any){
-  const project=workshop.project(member,projectId,true);
+  const project=workshop.editableProject(member,projectId);
   demand(config,503,'Private Tower storage is unavailable');
   const binding=storageStatus(workshop,config).binding;demand(binding&&storageStatus(workshop,config).state==='ready',409,'Private Tower storage is not ready');
   demand(uuid.test(body.attachmentId),400,'Attachment id is invalid');
@@ -45,7 +45,7 @@ export async function prepareChatAttachment(workshop:Workshop,member:Member,conf
 }
 
 export async function chatAttachmentStatus(workshop:Workshop,member:Member,config:StorageConfig|undefined,projectId:string,attachmentId:string){
-  workshop.project(member,projectId,true);demand(config,503,'Private Tower storage is unavailable');
+  workshop.editableProject(member,projectId);demand(config,503,'Private Tower storage is unavailable');
   const row=workshop.db.query('SELECT * FROM chat_attachments WHERE id=? AND workshop_id=? AND project_id=? AND uploader=?').get(attachmentId,workshop.id,projectId,member.pubkey) as any;
   demand(row,404,'Pasted image upload was not found');
   let job;try{job=await pollStorageJob(workshop,config,row.storage_job_id);}catch{return view(row,'error','Image upload status is unavailable. Check Canvas storage, then remove this image and paste it again.');}

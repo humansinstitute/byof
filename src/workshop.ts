@@ -82,19 +82,21 @@ export class Workshop {
     demand(project,404,'Napplet not found');
     demand(body.confirmPermanent===true&&body.confirmTitle===project.title,400,`Type ${project.title} and confirm permanent deletion`);
     demand(typeof body.expectedRevisionId==='string'&&body.expectedRevisionId===project.current_revision,409,'Napplet changed; reload before deleting');
-    demand(!this.db.query("SELECT id FROM requests WHERE project_id=? AND status IN ('accepted','queued','dispatching','dispatch_pending','screening','building','storage_pending','execution_uncertain')").get(id),409,'An active or uncertain build prevents deletion; reconcile it first');
-    demand(!unresolvedNativeExecution(this.db,id),409,'Native execution is uncertain; reconcile it before deleting this Napplet');
-    const epoch=this.db.query('SELECT state FROM builder_epochs WHERE project_id=? ORDER BY generation DESC LIMIT 1').get(id) as any;
-    demand(epoch?.state!=='deleting',409,'Native builder deletion is active or uncertain; reconcile it before deleting this Napplet');
-    const lifecycle=this.db.query("SELECT status FROM builder_deletions WHERE project_id=? AND status IN ('queued','dispatching','dispatch_pending','working','failed') ORDER BY generation DESC LIMIT 1").get(id) as any;
-    demand(!lifecycle,409,'Native builder deletion is active or uncertain; reconcile it before deleting this Napplet');
-    demand(!this.db.query("SELECT c.snapshot_id FROM publication_claims c JOIN publication_snapshots s ON s.id=c.snapshot_id JOIN json_each(s.body_json,'$.apps') a WHERE c.expires_at>? AND json_extract(a.value,'$.projectId')=? LIMIT 1").get(Date.now(),id),409,'A public publication is active; reconcile it before deleting this Napplet');
     return this.db.transaction(()=>{
       const current=this.db.query('SELECT * FROM projects WHERE id=? AND workshop_id=? AND deleted_at IS NULL').get(id,this.id) as any;
       demand(current,404,'Napplet not found');
       demand(current.current_revision===body.expectedRevisionId,409,'Napplet changed; reload before deleting');
       const stamp=now();
-      this.db.run("UPDATE builder_epochs SET state='retired',reason='napplet_deleted',retired_at=COALESCE(retired_at,?) WHERE project_id=? AND state='active'",[stamp,id]);
+      const requestsCancelled=this.db.run("UPDATE requests SET status='cancelled',error='Napplet deleted by a site administrator; late results are fenced.' WHERE project_id=? AND status IN ('accepted','queued','dispatching','dispatch_pending','screening','building','storage_pending','execution_uncertain')",[id]).changes;
+      const builderEpochsRetired=this.db.run("UPDATE builder_epochs SET state='retired',reason='napplet_deleted',retired_at=COALESCE(retired_at,?) WHERE project_id=? AND state IN ('active','deleting')",[stamp,id]).changes;
+      const builderDeletionsCancelled=this.db.run("UPDATE builder_deletions SET status='cancelled',error='Napplet deleted by a site administrator' WHERE project_id=? AND status IN ('queued','dispatching','dispatch_pending','working','failed')",[id]).changes;
+      const agentPublicationsCancelled=this.db.run("UPDATE agent_publications SET status='cancelled',error='Napplet deleted by a site administrator' WHERE request_id IN (SELECT id FROM requests WHERE project_id=?) AND status<>'published'",[id]).changes;
+      const publicationSnapshotsFenced=(this.db.query("SELECT DISTINCT c.snapshot_id FROM publication_claims c JOIN publication_snapshots s ON s.id=c.snapshot_id JOIN json_each(s.body_json,'$.apps') a WHERE json_extract(a.value,'$.projectId')=?").all(id) as any[]).map(row=>row.snapshot_id);
+      for(const snapshotId of publicationSnapshotsFenced){
+        this.db.run('UPDATE publication_claims SET expires_at=0 WHERE snapshot_id=?',[snapshotId]);
+        this.db.run("UPDATE publication_operations SET status='interrupted',error='Napplet deleted; publication claim fenced' WHERE snapshot_id=? AND status='pending'",[snapshotId]);
+        this.db.run("UPDATE publication_snapshots SET status='partial_failure' WHERE id=? AND status='publishing'",[snapshotId]);
+      }
       this.db.run('UPDATE consent SET granted=0,updated_at=? WHERE project_id=?',[stamp,id]);
       this.db.run(`INSERT INTO hosted_publication_exclusions VALUES(?,?,1,?)
         ON CONFLICT(workshop_id,project_id) DO UPDATE SET excluded=1,updated_at=excluded.updated_at`,[this.id,id,stamp]);
@@ -108,8 +110,9 @@ export class Workshop {
         if(boardObjectRemoved)this.db.run('UPDATE workshop_boards SET version=version+1,objects_json=? WHERE workshop_id=? AND version=?',[JSON.stringify(kept),this.id,board.version]);
       }
       demand(this.db.run('UPDATE projects SET hidden=1,shared_revision=NULL,deleted_at=?,deleted_by=? WHERE id=? AND workshop_id=? AND deleted_at IS NULL',[stamp,member.pubkey,id,this.id]).changes===1,409,'Napplet changed; reload before deleting');
-      this.db.run('INSERT INTO project_admin_audit VALUES(?,?,?,?,?,?,?,?)',[crypto.randomUUID(),this.id,id,current.owner,member.pubkey,'delete',JSON.stringify({localDataDeleted,boardObjectRemoved,externalArtifactsRetained:true,nativeLifecycleUnchanged:true}),stamp]);
-      return {deletedNappletId:id,deletedAt:stamp,localDataDeleted,boardObjectRemoved,externalArtifactsRetained:true,nativeLifecycleUnchanged:true,message:'Napplet deleted from Freedom Tools. This action did not delete external publication artifacts or change the separately audited native lifecycle.'};
+      const fencing={requestsCancelled,builderEpochsRetired,builderDeletionsCancelled,agentPublicationsCancelled,publicationClaimsFenced:publicationSnapshotsFenced.length};
+      this.db.run('INSERT INTO project_admin_audit VALUES(?,?,?,?,?,?,?,?)',[crypto.randomUUID(),this.id,id,current.owner,member.pubkey,'delete',JSON.stringify({localDataDeleted,boardObjectRemoved,externalArtifactsRetained:true,nativeLifecycleFenced:true,...fencing}),stamp]);
+      return {deletedNappletId:id,deletedAt:stamp,localDataDeleted,boardObjectRemoved,externalArtifactsRetained:true,nativeLifecycleFenced:true,...fencing,message:'Napplet deleted from Freedom Tools. Outstanding work was fenced; immutable history and external artifacts were retained.'};
     }).immediate();
   }
   room(member: Member) {
@@ -222,7 +225,8 @@ export class Workshop {
       const project = this.project(member, id, !hostOperation), requestId = text(body.requestId, "Request ID", 100);
       const owner = this.projectOwnerAccess(project.owner);
       demand(owner?.state === "admitted", 403, "Project owner must be admitted");
-      const hostReason = hostOperation ? text(body.operatorReason, "Host execution reason", 1000) : null;
+      if(hostOperation)demand(!Object.hasOwn(body,'operatorReason'),400,'Administrator messages do not use a reason field');
+      const hostReason = hostOperation ? 'administrator_message' : null;
       text(body.prompt, "Instruction", limits.promptChars);
       // Validate emptiness and size without rewriting the participant's exact instruction.
       const prompt: string = body.prompt;
